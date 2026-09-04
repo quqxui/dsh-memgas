@@ -1,0 +1,11 @@
+{
+  "name": "@memgas/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": { ".": { "types": "./lib/index.d.ts", "default": "./lib/index.js" } },
+  "files": ["lib"],
+  "engines": { "node": "^22.19.0 || >=24.0.0" }
+}
