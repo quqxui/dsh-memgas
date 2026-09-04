@@ -1,14 +1,31 @@
 # dsh-memgas
 
-> **状态：M1 实施中（2026-09-05）**。M0 脚手架完成，M1 的基线检索链路（存储、词法与稠密双通道、RRF 融合与保底、密钥拦截、三个 dsh 工具）已实现并有 65 个测试覆盖；自动收割、演化与论文增强通道尚未开始。英文版 README 在首个发布版本前补齐。
+> **状态：M1 实施中（2026-09-05）**。M0 脚手架完成，M1 的基线检索链路（存储、词法与稠密双通道、RRF 融合与保底、密钥拦截、三个 dsh 工具）已实现，71 个测试覆盖，并在真实 dsh 中验证过加载；自动收割、演化与论文增强通道尚未开始。英文版 README 在首个发布版本前补齐。
 
 ## 开发
 
 ```sh
 pnpm install
-pnpm test        # vitest，65 个测试
+pnpm test        # vitest，71 个测试
 pnpm run build   # tsc -b，同时做类型检查
 ```
+
+### 在真实 dsh 里验证
+
+```sh
+pnpm run build
+npm i @deepseek-ai/dsh          # 在任意空目录
+cat > overlay.yml <<'YML'
+- insert:
+    - id: memgas
+      name: '<仓库绝对路径>/packages/dsh-plugin/lib/index.js'
+      config:
+        dataDir: '/tmp/memgas-data'
+YML
+DSH_HOME=/tmp/dshhome npx dsh --profile headless --patch "$PWD/overlay.yml" "记住：本项目用 pnpm"
+```
+
+已验证到的程度（2026-09-05，dsh 0.1.2-rc.1）：overlay 层被解析、插件挂载、`apply` 执行、按作用域建出 SQLite 文件，dsh 启动一路走到模型请求。再往后需要 `DEEPSEEK_API_KEY`，模型实际调用工具的链路尚未验证。
 
 **dsh-memgas** 是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（dsh）的长期记忆插件，把 **记忆存储 → 演化 → 检索利用** 做成一个闭环。多粒度关联与自适应选择的思路来自 ICLR 2026 论文 *From Single to Multi-Granularity: Toward Long-Term Memory Association and Selection of Conversational Agents*（MemGAS），但工程实现以真实编码会话的效果为准，不以复现论文为目标。
 
@@ -355,6 +372,7 @@ dsh-memgas/
 - 2026-09-04：许可证倾向 MIT，待确认。
 - 2026-09-05：存储用 Node 内置的 `node:sqlite`，不用 better-sqlite3。理由：原生模块需要 postinstall 构建，而 `dsh plugin add` 走的 pnpm ≥10 默认拦截构建脚本，会把「装上就能用」变成「先授权再重装」。代价是依赖宿主 Node 自带的 SQLite，因此 FTS5 在打开库时做能力探测，缺失时自动切到进程内的 JS 倒排索引（`capabilities.lexicalIndex` 会显示 `memory`）。
 - 2026-09-05：插件不在构建期依赖 dsh 的包。`@deepseek-ai/dsh-tools` 依赖未发布的 `@deepseek-ai/dsh-type-meta`，在 dsh 仓库外装不上；插件改为按 npm 上的 `.d.ts` 抄出所需接口的结构化类型（`ToolDefinition` = name/description/parameters + output.schema/render + execute），注册原始 JSON Schema 工具定义，与 MCP 工具进入注册表的路径一致。
+- 2026-09-05：插件必须导出 `inject = ['tools']`，且自身故障不得阻断 dsh 启动。集成测试发现：Cordis 在未声明 inject 时拒绝 `ctx.tools` 访问，并且该异常会让整棵插件树加载失败，即整个 dsh 起不来。现在 `apply` 把开库失败降级为内存库并在 `memory_status` 中说明。
 - 2026-09-05：中文检索走 CJK 双字组。SQLite 的 unicode61 分词器把整段连续中文当成一个 token，无法部分匹配；索引与查询都改用相邻汉字组成的 bigram，词法通道因此对中文可用。
 
 ## 未决问题

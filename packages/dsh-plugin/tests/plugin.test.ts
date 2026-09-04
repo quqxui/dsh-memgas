@@ -3,7 +3,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, test } from 'vitest'
-import { apply } from '../src/index.ts'
+import { apply, inject } from '../src/index.ts'
 import { resolveScope, storePathFor } from '../src/workspace.ts'
 
 interface RegisteredTool {
@@ -21,6 +21,12 @@ function fakeContext() {
     registered: tools,
   }
 }
+
+describe('plugin manifest', () => {
+  test('declares the services it reaches for, or Cordis refuses the context access', () => {
+    expect(inject).toContain('tools')
+  })
+})
 
 describe('apply', () => {
   test('registers the memory tools on the tool registry', () => {
@@ -49,6 +55,14 @@ describe('apply', () => {
     const value = await search.execute({ query: '部署端口' }, {})
 
     expect(String(value)).toContain('8080')
+  })
+
+  test('never takes the harness down when its own store cannot be opened', async () => {
+    const ctx = fakeContext()
+    // A path under a regular file can never become a directory.
+    expect(() => apply(ctx as never, { dataDir: '/dev/null/memgas' })).not.toThrow()
+    const status = ctx.registered.find(tool => tool.name === 'memory_status')!
+    expect(String(await status.execute({}, {}))).toContain('未能打开磁盘记忆库')
   })
 
   test('renders tool output as a text block for the model', async () => {

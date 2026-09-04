@@ -62,9 +62,10 @@ export async function handleSave(
   return `已记住（${saved.id}）：${saved.content}`
 }
 
-export function handleStatus(memory: MemoryService): string {
+export function handleStatus(memory: MemoryService, warning?: string | null): string {
   const status = memory.status()
   return [
+    ...(warning ? [warning] : []),
     `记忆条数：${status.units}`,
     `向量模型：${status.embedder}`,
     `词法索引：${status.lexicalIndex}`,

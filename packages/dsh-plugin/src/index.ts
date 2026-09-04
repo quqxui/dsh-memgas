@@ -7,6 +7,12 @@ import { resolveScope, storePathFor } from './workspace.ts'
 
 export const name = 'memgas'
 
+/**
+ * Cordis refuses `ctx.tools` access unless the plugin declares it, and the
+ * refusal aborts the whole plugin tree, so this list is load-bearing.
+ */
+export const inject = ['tools']
+
 /** Structural view of the parts of the Cordis context this plugin uses. */
 interface ToolRegistryLike {
   register(definition: {
@@ -46,8 +52,19 @@ function openService(config: Config, scope: string): MemoryService {
 export function apply(ctx: ContextLike, config: Config = {}): void {
   const cwd = config.cwd ?? process.cwd()
   const scope = resolveScope(cwd)
-  const memory = openService(config, scope)
   const k = config.k ?? 8
+
+  // A memory plugin that cannot open its database must still let the harness
+  // start: it degrades to a session-local store and says so in its status.
+  let memory: MemoryService
+  let storeWarning: string | null = null
+  try {
+    memory = openService(config, scope)
+  } catch (error) {
+    storeWarning = `未能打开磁盘记忆库（${error instanceof Error ? error.message : String(error)}），` +
+      '本次会话的记忆只保存在内存中，退出即丢失。'
+    memory = createMemoryService({ path: ':memory:' })
+  }
 
   ctx.tools.register({
     name: 'memory_search',
@@ -94,7 +111,7 @@ export function apply(ctx: ContextLike, config: Config = {}): void {
     parameters: { type: 'object', properties: {}, additionalProperties: false },
     output: TEXT_OUTPUT,
     async execute() {
-      return handleStatus(memory)
+      return handleStatus(memory, storeWarning)
     },
   })
 }
