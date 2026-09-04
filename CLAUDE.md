@@ -6,17 +6,21 @@ DeepSeek Harness (dsh) 的长期记忆插件：存储 + 演化 + 检索利用。
 
 **设计文档就是 `README.md`。改设计先改 README，再改代码。**
 
-当前阶段：M1 实施中。`packages/core` 有存储、双基线通道、RRF 融合与检索编排；`packages/dsh-plugin` 有三个工具与 bundle 清单。动手前先读 README 的「设计原则」「路线图」「未决问题」三节。
+当前阶段：M2 完成，M3（增强通道）与 M4（演化）未开始。`packages/core` 有存储、双基线通道、RRF 融合、检索编排、后台队列、收割器、提示词与结构化输出校验、注入决策、画像段；`packages/dsh-plugin` 有三个工具、事件映射、LLM 客户端、pre-step 注入与 bundle 清单。动手前先读 README 的「设计原则」「路线图」「决策记录」「未决问题」。
 
 ```sh
-pnpm test        # 全量测试，当前 65 个
+pnpm test        # 全量测试，当前 137 个
 pnpm run build   # tsc -b，兼做类型检查
 ```
+
+集成验证方法在 README「在真实 dsh 里验证」；上次装好的 dsh 在会话临时目录，新会话要重装。
 
 已定的实现约束：
 - 存储用 Node 内置 `node:sqlite`，**不引入原生模块**（原生模块的 postinstall 会被 `dsh plugin add` 的 pnpm 构建拦截挡住）。FTS5 在开库时探测，缺失即切 JS 倒排索引。
 - 插件**不在构建期依赖 dsh 的包**（`@deepseek-ai/dsh-tools` 依赖未发布的私有包）。所需接口以结构化类型写在 `packages/dsh-plugin/src/index.ts`，对照 npm 上 `@deepseek-ai/dsh-tools` 与 `@deepseek-ai/dsh-llm` 的 `.d.ts` 校准。
 - 中文词法检索走 CJK 双字组，见 `packages/core/src/text.ts`。
+- 核心库对模型只依赖 `LlmClient`（文本进文本出，可带 sessionId），对宿主事件只依赖 `HarvestEvent`；dsh 侧的映射在 `packages/dsh-plugin/src/session-events.ts` 与 `llm-client.ts`。测试用假 ctx 走整条链路，不 mock 内部。
+- 插件的 `apply` 返回 `{ idle() }` 供测试等待后台队列排空；Cordis 忽略返回值。
 
 ## 第一原则：论文是参考，不是规格
 
@@ -53,4 +57,4 @@ dsh 处于 developer preview，接口会有破坏性变更。实现时以当时�
 
 - 提示词自行设计，不移植论文附录模板（见 README「提示词策略」）。所有提示词版本化，记忆单元记录生成它的提示词版本。
 - 中文优先：README、注释、提示词面向中英混合场景，记忆内容保留原语言不翻译。
-- 工具链：Node 26 已装，pnpm 未装（M0 需 `corepack enable` 或 `npm i -g pnpm`）。
+- 工具链：Node 26、pnpm 11 已装。

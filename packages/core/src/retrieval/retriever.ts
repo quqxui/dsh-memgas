@@ -6,6 +6,8 @@ export interface RetrievalRequest {
   query: string
   scopes?: string[]
   k?: number
+  /** Tighter deadline for this call only, e.g. on the pre-step path. */
+  budgetMs?: number
 }
 
 /** One way of proposing memories for a query. Channels never see each other. */
@@ -107,7 +109,7 @@ export class Retriever {
       }
       const started = Date.now()
       try {
-        const budget = Math.min(this.opts.channelTimeoutMs, this.opts.budgetMs)
+        const budget = Math.min(this.opts.channelTimeoutMs, this.opts.budgetMs, request.budgetMs ?? Infinity)
         const candidates = await withTimeout(channel.retrieve(request), budget)
         results.push({ channel: channel.name, candidates })
         reports.push({ channel: channel.name, status: 'ok', ms: Date.now() - started, count: candidates.length })

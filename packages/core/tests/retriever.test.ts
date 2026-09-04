@@ -78,6 +78,16 @@ describe('Retriever', () => {
     expect(result.channels.find(report => report.channel === 'graph')!.status).toBe('timeout')
   })
 
+  test('honours a tighter per-request budget than the configured timeout', async () => {
+    const retriever = new Retriever({
+      store,
+      channels: [{ ...slow('dense', 100), baseline: true }],
+      channelTimeoutMs: 1000,
+    })
+    const result = await retriever.retrieve({ query: 'memory', k: 3, budgetMs: 10 })
+    expect(result.channels[0]!.status).toBe('timeout')
+  })
+
   test('skips enhancement channels until the store leaves cold start', async () => {
     const retriever = new Retriever({
       store,

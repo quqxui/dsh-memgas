@@ -6,6 +6,7 @@ export interface Provenance {
   sessionId?: string
   seqStart?: number
   seqEnd?: number
+  turn?: number
   cwd?: string
   gitBranch?: string
 }
@@ -27,4 +28,8 @@ export interface MemoryUnit {
   embedderId: string | null
   provenance: Provenance
   derivedFrom: string[]
+  /** Fact taxonomy for summary-granularity units; null for raw turns and keyword lists. */
+  kind?: string | null
+  /** Extractor confidence in [0, 1]; null when the unit was written by the user directly. */
+  confidence?: number | null
 }

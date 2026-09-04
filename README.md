@@ -1,12 +1,12 @@
 # dsh-memgas
 
-> **状态：M1 实施中（2026-09-05）**。M0 脚手架完成，M1 的基线检索链路（存储、词法与稠密双通道、RRF 融合与保底、密钥拦截、三个 dsh 工具）已实现，71 个测试覆盖，并在真实 dsh 中验证过加载；自动收割、演化与论文增强通道尚未开始。英文版 README 在首个发布版本前补齐。
+> **状态：M2 完成（2026-09-05）**。M1 基线检索链路与 M2 自动收割（会话事件监听、复用宿主模型做结构化抽取、后台队列、轮次前主动注入、常驻画像段、compaction 摘要收割、使用回执）均已实现，137 个测试覆盖，并在真实 dsh 中验证过加载；演化（M4）与论文增强通道（M3）尚未开始。英文版 README 在首个发布版本前补齐。
 
 ## 开发
 
 ```sh
 pnpm install
-pnpm test        # vitest，71 个测试
+pnpm test        # vitest，137 个测试
 pnpm run build   # tsc -b，同时做类型检查
 ```
 
@@ -25,9 +25,9 @@ YML
 DSH_HOME=/tmp/dshhome npx dsh --profile headless --patch "$PWD/overlay.yml" "记住：本项目用 pnpm"
 ```
 
-已验证到的程度（2026-09-05，dsh 0.1.2-rc.1）：overlay 层被解析、插件挂载、`apply` 执行、按作用域建出 SQLite 文件，dsh 启动一路走到模型请求。再往后需要 `DEEPSEEK_API_KEY`，模型实际调用工具的链路尚未验证。
+已验证到的程度（2026-09-05，dsh 0.1.2-rc.1）：overlay 层被解析、插件挂载并注入 `tools` / `systemPrompt` / `llm` 三个服务、`apply` 执行、按作用域建出 SQLite 文件，dsh 启动一路走到模型请求。再往后需要 `DEEPSEEK_API_KEY`，模型实际调用工具、真实会话被收割、pre-step 注入这三条链路只在假 ctx 下测过，没有在真实 dsh 里跑过。
 
-**dsh-memgas** 是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（dsh）的长期记忆插件，把 **记忆存储 → 演化 → 检索利用** 做成一个闭环。多粒度关联与自适应选择的思路来自 ICLR 2026 论文 *From Single to Multi-Granularity: Toward Long-Term Memory Association and Selection of Conversational Agents*（MemGAS），但工程实现以真实编码会话的效果为准，不以复现论文为目标。
+**dsh-memgas** 是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（dsh）的长期记忆插件，把 **记忆存储 → 演化 → 检索利用** 做成一个闭环。多粒度关联与自适应选择的思路来自 ICLR 2026 论文 *From Single to Multi-Granularity: Toward Long-Term Memory Association and Selection of Conversational Agents*（MemGAS）。
 
 一句话：让 dsh 里的 agent 跨会话记住你和你的项目，记忆随使用不断整理、更新、遗忘，并在每次需要时用最稳的方式取回。
 
@@ -354,7 +354,7 @@ dsh-memgas/
 
 1. **M0 脚手架**：pnpm workspace、三包骨架、CI（typecheck/lint/test）、从源码检出的 dsh 用 `--patch` 加载 hello 插件、`dsh plugin add` 本地 link 链路验证。
 2. **M1 基线可用**：SQLite 存储、FTS5 词法索引、向量索引、词法 embedder、本地 ONNX embedder 自动下载与降级链、C1+C2 双通道加 RRF 融合、`memory_save` / `memory_search` / `memory_status`、`/memory` 与 `/memory diag`。**这一版本本身就是一个完整可用的记忆插件**，后续里程碑都在它之上叠加。
-3. **M2 自动收割与提示词**：`session/event` 收割、compaction 收割、七个提示词与 schema、`ctx.jobs` 后台化、主动注入、常驻段、使用回执。
+3. **M2 自动收割与提示词**（已完成）：`session/event` 收割、compaction 收割、提示词与 schema 校验、后台队列、主动注入、常驻段、使用回执。实际落地与原计划的差异见决策记录 2026-09-05 各条。
 4. **M3 增强通道**：多粒度 + 熵路由（C3）、GMM 关联图 + PPR（C4）、健康检查与降级阶梯、可选 LLM 过滤。**验收**：在 `bench/` 的真实会话语料上，`hybrid` 不劣于 `lite`；跑不赢则该通道默认关闭并如实记录。
 5. **M4 演化**：调和、强化、衰减、抽象、重关联；`/memory log` / `review` / `export` / `purge`；版本链与冲突展示。
 6. **M5 memgas-mcp 与发布**：MCP server、共享记忆库验证（dsh 写、Claude Code 读）、双语 README、Model Experience 说明、npm 发布、`dsh-plugin` topic、提交各 awesome 列表、Web UI 设置卡片。
@@ -373,17 +373,24 @@ dsh-memgas/
 - 2026-09-05：存储用 Node 内置的 `node:sqlite`，不用 better-sqlite3。理由：原生模块需要 postinstall 构建，而 `dsh plugin add` 走的 pnpm ≥10 默认拦截构建脚本，会把「装上就能用」变成「先授权再重装」。代价是依赖宿主 Node 自带的 SQLite，因此 FTS5 在打开库时做能力探测，缺失时自动切到进程内的 JS 倒排索引（`capabilities.lexicalIndex` 会显示 `memory`）。
 - 2026-09-05：插件不在构建期依赖 dsh 的包。`@deepseek-ai/dsh-tools` 依赖未发布的 `@deepseek-ai/dsh-type-meta`，在 dsh 仓库外装不上；插件改为按 npm 上的 `.d.ts` 抄出所需接口的结构化类型（`ToolDefinition` = name/description/parameters + output.schema/render + execute），注册原始 JSON Schema 工具定义，与 MCP 工具进入注册表的路径一致。
 - 2026-09-05：插件必须导出 `inject = ['tools']`，且自身故障不得阻断 dsh 启动。集成测试发现：Cordis 在未声明 inject 时拒绝 `ctx.tools` 访问，并且该异常会让整棵插件树加载失败，即整个 dsh 起不来。现在 `apply` 把开库失败降级为内存库并在 `memory_status` 中说明。
-- 2026-09-05：中文检索走 CJK 双字组。SQLite 的 unicode61 分词器把整段连续中文当成一个 token，无法部分匹配；索引与查询都改用相邻汉字组成的 bigram，词法通道因此对中文可用。
+- 2026-09-05：中文检索走 CJK 双字组。
+- 2026-09-05：M2 的提示词从计划的七个收敛为两个（`summarize-turn@1`、`summarize-session@1`），关键词抽取并入摘要输出，一次调用同时产出摘要、事实、关键词。`reconcile-fact` / `abstract-cluster` / `synthesize-profile` 属于演化，推到 M4；`filter-results` 属于增强通道，推到 M3。两者共用一套输出契约与校验器（`validateExtraction`），坏掉的单条 fact 被丢弃而不是整批拒绝。
+- 2026-09-05：会话级摘要只存 `session` 粒度单元与关键词，不再单独落 fact。轮次级已经抽过的事实在会话级会重复出现，而去重合并是 M4 调和过程的职责，在那之前宁可少存也不制造重复。
+- 2026-09-05：不用 `ctx.jobs`，自带串行后台队列（`BackgroundQueue`）。dsh 的 JobRegistry 面向用户可见的进程型任务（有输出流、kill、等待），与进程内异步维护工作形状不符。
+- 2026-09-05：收割用的模型路由取自会话日志里的 `request/header`（与 `dsh-session-title-llm` 同一做法），收割发生在 turn/end 之后，路由此时必然已知；不引入 `agentDefaultModel` 依赖。
+- 2026-09-05：主动注入挂在 `agent/pre-step` waterfall 上：先 `next()` 拿到 enter 决策，再把召回卡片作为 `source.kind = 'plugin', form = 'recall'` 的用户消息插到本步消息之前；检索预算 150ms，同一进程内同一条记忆只注入一次；召回失败一律返回原决策。
+- 2026-09-05：注入判定不看 RRF 分数（它只编码排名），看证据：两条通道同时命中，或稠密通道单独命中且余弦 ≥ 0.6。
+- 2026-09-05：作用域在插件挂载时按进程工作目录解析一次，同一 host 里所有会话共用。dsh web 可以在不同工作区开会话，这种情况下记忆会归错项目；修正需要从 agent 上拿到每个会话的工作目录，留到验证多工作区行为后处理。SQLite 的 unicode61 分词器把整段连续中文当成一个 token，无法部分匹配；索引与查询都改用相邻汉字组成的 bigram，词法通道因此对中文可用。
 
 ## 未决问题
 
 - 默认模型定稿：`multilingual-e5-small` 还是 `bge-small-zh-v1.5`，取决于 M1 在中英混合数据上的实测。
 - RRF 的 k 常数与各通道权重初值，需要 bench 数据支撑，先用文献常用值 60 起步。
 - `ctx.storageDomain` 是否适合存向量与大图，还是 core 自管 SQLite 更省事。M0 读完 storage 子系统文档后定。
-- 主动注入的触发点用 `agent/pre-step` waterfall 还是 `turn/start` 事件加 `agent.inject()`，M2 前对照 agent-lifecycle 文档确定。
 - 真实会话语料如何采集与脱敏（自用会话 vs 公开数据），这决定 M3 验收是否可信。
 - **发布前必须解决**：`dsh-memgas` 依赖 `@memgas/core` 的 `workspace:*`，打包时会重写成一个未发布的版本号，用户 `dsh plugin add dsh-memgas` 会装不上。两条路：把 `@memgas/core` 一并发到 npm（`memgas-mcp` 也要用它，倾向这条），或在构建时把 core 打进插件的 `lib/`。M5 前必须选定。
-- 是否要 Web UI 记忆浏览面板（client 包），还是先只做 `/memory` 命令。
+- 是否要 Web UI 记忆浏览面板（client 包），还是先只做 `/memory` 命令。`/memory` 命令本身也还没做：`ctx.commands` 的注册接口尚未从上游类型里核对。
+- 多工作区会话的作用域归属（见 2026-09-05 决策记录最后一条）。
 
 ## 引用
 
@@ -396,4 +403,3 @@ dsh-memgas/
 }
 ```
 
-论文代码：[Applied-Machine-Learning-Lab/ICLR2026_MemGAS](https://github.com/Applied-Machine-Learning-Lab/ICLR2026_MemGAS)。本插件是独立的 TypeScript 实现，不依赖该仓库，也不以复现论文数值为目标。

@@ -11,6 +11,8 @@ export interface SaveInput {
   content: string
   scope: string
   granularity?: Granularity
+  /** Fact taxonomy entry, or `note` for something the user asked to keep verbatim. */
+  kind?: string
   provenance?: Partial<Provenance>
 }
 
@@ -22,8 +24,10 @@ export interface MemoryStatus {
 }
 
 export interface MemoryService {
+  readonly store: MemoryStore
+  readonly embedder: Embedder
   save(input: SaveInput): Promise<MemoryUnit | null>
-  search(request: { query: string; scopes?: string[]; k?: number }): Promise<RetrievalResult>
+  search(request: { query: string; scopes?: string[]; k?: number; budgetMs?: number }): Promise<RetrievalResult>
   status(): MemoryStatus
   close(): void
 }
@@ -38,8 +42,8 @@ export interface MemoryServiceOptions {
 }
 
 class DefaultMemoryService implements MemoryService {
-  private readonly store: MemoryStore
-  private readonly embedder: Embedder
+  readonly store: MemoryStore
+  readonly embedder: Embedder
   private readonly retriever: Retriever
   private redactions = 0
 
@@ -80,6 +84,8 @@ class DefaultMemoryService implements MemoryService {
       embedderId: this.embedder.id,
       provenance: { occurredAt: now, ...input.provenance },
       derivedFrom: [],
+      kind: input.kind ?? null,
+      confidence: null,
     }
 
     this.store.put(unit)
@@ -88,7 +94,7 @@ class DefaultMemoryService implements MemoryService {
     return unit
   }
 
-  async search(request: { query: string; scopes?: string[]; k?: number }): Promise<RetrievalResult> {
+  async search(request: { query: string; scopes?: string[]; k?: number; budgetMs?: number }): Promise<RetrievalResult> {
     return this.retriever.retrieve(request)
   }
 

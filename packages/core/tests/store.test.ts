@@ -90,3 +90,44 @@ describe('MemoryStore', () => {
     expect(fallback.searchLexical('store.ts 超时', { limit: 5 }).map(c => c.id)).toEqual(['m1'])
   })
 })
+
+describe('MemoryStore extensions', () => {
+  let store: MemoryStore
+
+  beforeEach(() => {
+    store = openStore({ path: ':memory:' })
+  })
+
+  test('round-trips fact kind and confidence', () => {
+    store.put(unit({ id: 'm1', content: 'c', kind: 'decision', confidence: 0.8 }))
+    expect(store.get('m1')).toMatchObject({ kind: 'decision', confidence: 0.8 })
+  })
+
+  test('stores string metadata such as harvest cursors', () => {
+    expect(store.getMeta('cursor:s1')).toBeNull()
+    store.setMeta('cursor:s1', '12')
+    expect(store.getMeta('cursor:s1')).toBe('12')
+    store.setMeta('cursor:s1', '13')
+    expect(store.getMeta('cursor:s1')).toBe('13')
+  })
+
+  test('touch bumps access count and last access time without changing content', () => {
+    store.put(unit({ id: 'm1', content: 'c' }))
+    store.touch(['m1', 'missing'], 1_800_000_000_000)
+    expect(store.get('m1')).toMatchObject({ accessCount: 1, lastAccessedAt: 1_800_000_000_000, content: 'c' })
+  })
+
+  test('lists active units of a scope by importance, most important first', () => {
+    store.put(unit({ id: 'low', content: 'a', scope: 'global', importance: 0.2 }))
+    store.put(unit({ id: 'high', content: 'b', scope: 'global', importance: 0.9 }))
+    store.put(unit({ id: 'archived', content: 'c', scope: 'global', importance: 1, status: 'archived' }))
+    store.put(unit({ id: 'elsewhere', content: 'd', scope: 'project:p', importance: 1 }))
+    expect(store.listActive({ scopes: ['global'], limit: 10 }).map(u => u.id)).toEqual(['high', 'low'])
+  })
+
+  test('listActive can be narrowed to fact kinds', () => {
+    store.put(unit({ id: 'pref', content: 'a', scope: 'global', kind: 'preference' }))
+    store.put(unit({ id: 'todo', content: 'b', scope: 'global', kind: 'todo' }))
+    expect(store.listActive({ scopes: ['global'], limit: 10, kinds: ['preference'] }).map(u => u.id)).toEqual(['pref'])
+  })
+})

@@ -14,17 +14,44 @@ interface RegisteredTool {
   execute(args: unknown, exec: unknown): Promise<unknown>
 }
 
+const extraction = JSON.stringify({
+  summary: '把 store.ts 的超时改成 500ms',
+  facts: [{ kind: 'decision', content: 'store.ts 的检索超时定为 500ms', confidence: 0.9, stated_by: 'user' }],
+  keywords: ['store.ts'],
+})
+
 function fakeContext() {
   const tools: RegisteredTool[] = []
+  const sections: { name: string; order: number; text: string | (() => string) }[] = []
+  const listeners = new Map<string, ((...args: unknown[]) => unknown)[]>()
   return {
     tools: { register: (definition: RegisteredTool) => { tools.push(definition); return () => {} } },
+    systemPrompt: { section: (section: { name: string; order: number; text: string | (() => string) }) => { sections.push(section); return () => {} } },
+    llm: { async *stream() { yield { type: 'text-delta', text: extraction } } },
+    on: (event: string, listener: (...args: unknown[]) => unknown) => {
+      listeners.set(event, [...(listeners.get(event) ?? []), listener])
+      return () => {}
+    },
     registered: tools,
+    sections,
+    fire: (event: string, ...args: unknown[]) => Promise.all((listeners.get(event) ?? []).map(listener => listener(...args))),
   }
+}
+
+const userMessage = (text: string) => ({ id: 'u', role: 'user', content: [{ type: 'text', text }], source: { kind: 'user' } })
+
+async function runTurn(ctx: ReturnType<typeof fakeContext>, sessionId: string, turn: number, userText: string, assistantText: string) {
+  const session = { id: sessionId }
+  await ctx.fire('session/event', session, { type: 'turn/start', data: { turn } })
+  await ctx.fire('session/event', session, { type: 'user/message', data: userMessage(userText) })
+  await ctx.fire('session/event', session, { type: 'request/header', data: { header: { config: { provider: 'p', model: 'm' } }, reason: 'initial' } })
+  await ctx.fire('session/event', session, { type: 'assistant/message', data: { turn, step: 1, message: { content: [{ type: 'text', text: assistantText }] } } })
+  await ctx.fire('session/event', session, { type: 'turn/end', data: { turn, reason: { kind: 'completed' } } })
 }
 
 describe('plugin manifest', () => {
   test('declares the services it reaches for, or Cordis refuses the context access', () => {
-    expect(inject).toContain('tools')
+    expect(inject).toEqual(expect.arrayContaining(['tools', 'systemPrompt', 'llm']))
   })
 })
 
@@ -71,6 +98,73 @@ describe('apply', () => {
     const status = ctx.registered.find(tool => tool.name === 'memory_status')!
     const value = await status.execute({}, {})
     expect(status.output.render({}, value)).toEqual([{ type: 'text', text: String(value) }])
+  })
+})
+
+describe('automatic harvesting', () => {
+  test('turns a completed session turn into searchable memories through the host model', async () => {
+    const ctx = fakeContext()
+    const handle = apply(ctx as never, { dataDir: ':memory:', minTurnChars: 10 })
+    await runTurn(ctx, 's1', 1, '把 packages/core/src/store.ts 的检索超时改成 500ms', '改好了')
+    await handle.idle()
+
+    const search = ctx.registered.find(tool => tool.name === 'memory_search')!
+    const value = String(await search.execute({ query: 'store.ts 超时' }, {}))
+    expect(value).toContain('检索超时定为 500ms')
+  })
+
+  test('reports harvest progress in memory_status', async () => {
+    const ctx = fakeContext()
+    const handle = apply(ctx as never, { dataDir: ':memory:', minTurnChars: 10 })
+    await runTurn(ctx, 's1', 1, '把 packages/core/src/store.ts 的检索超时改成 500ms', '改好了')
+    await handle.idle()
+    const status = ctx.registered.find(tool => tool.name === 'memory_status')!
+    expect(String(await status.execute({}, {}))).toMatch(/收割.*1/)
+  })
+})
+
+describe('proactive recall', () => {
+  const decisionFor = (text: string) => ({ kind: 'enter' as const, messages: [userMessage(text)] })
+
+  test('prepends matching memories to the step the model is about to take', async () => {
+    const ctx = fakeContext()
+    apply(ctx as never, { dataDir: ':memory:' })
+    await ctx.registered.find(tool => tool.name === 'memory_save')!.execute({ content: '接口层统一用 zod 做参数校验' }, {})
+
+    const [decision] = await ctx.fire('agent/pre-step', { agent: {}, messages: decisionFor('用 zod 做参数校验').messages, turn: 1, step: 1 }, async () => decisionFor('用 zod 做参数校验')) as { messages: { source: { kind: string; form?: string }; content: { text: string }[] }[] }[]
+    expect(decision!.messages).toHaveLength(2)
+    expect(decision!.messages[0]!.source).toMatchObject({ kind: 'plugin', form: 'recall' })
+    expect(decision!.messages[0]!.content[0]!.text).toContain('zod')
+  })
+
+  test('does not show the same memory twice in one session', async () => {
+    const ctx = fakeContext()
+    apply(ctx as never, { dataDir: ':memory:' })
+    await ctx.registered.find(tool => tool.name === 'memory_save')!.execute({ content: '接口层统一用 zod 做参数校验' }, {})
+    const payload = { agent: {}, messages: decisionFor('用 zod 做参数校验').messages, turn: 1, step: 1 }
+    await ctx.fire('agent/pre-step', payload, async () => decisionFor('用 zod 做参数校验'))
+    const [second] = await ctx.fire('agent/pre-step', payload, async () => decisionFor('用 zod 做参数校验')) as { messages: unknown[] }[]
+    expect(second!.messages).toHaveLength(1)
+  })
+
+  test('leaves a step without human text alone', async () => {
+    const ctx = fakeContext()
+    apply(ctx as never, { dataDir: ':memory:' })
+    const decision = { kind: 'enter' as const, messages: [{ ...userMessage('x'), source: { kind: 'plugin', plugin: 'other' } }] }
+    const [result] = await ctx.fire('agent/pre-step', { agent: {}, messages: decision.messages, turn: 1, step: 1 }, async () => decision)
+    expect(result).toBe(decision)
+  })
+})
+
+describe('profile section', () => {
+  test('registers a system prompt section that reflects global memories', async () => {
+    const ctx = fakeContext()
+    apply(ctx as never, { dataDir: ':memory:' })
+    const section = ctx.sections.find(s => s.name === 'memgas:profile')!
+    const render = () => (typeof section.text === 'function' ? section.text() : section.text)
+    expect(render()).toBe('')
+    await ctx.registered.find(tool => tool.name === 'memory_save')!.execute({ content: '回复一律用中文', global: true }, {})
+    expect(render()).toContain('回复一律用中文')
   })
 })
 

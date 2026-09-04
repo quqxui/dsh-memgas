@@ -1,35 +1,6 @@
-import type { MemoryService, MemoryUnit, RetrievalResult } from '@memgas/core'
+import { formatCard, type MemoryService, type RetrievalResult } from '@memgas/core'
 
-function scopeLabel(scope: string): string {
-  return scope === 'global' ? 'global' : 'project'
-}
-
-/** Local calendar date: the user reasons in their own timezone, not in UTC. */
-function localDate(timestamp: number): string {
-  const date = new Date(timestamp)
-  return [
-    date.getFullYear(),
-    String(date.getMonth() + 1).padStart(2, '0'),
-    String(date.getDate()).padStart(2, '0'),
-  ].join('-')
-}
-
-/**
- * The model-visible shape of one memory.
- *
- * The header carries provenance on purpose: the model has to be able to weigh a
- * three-month-old decision against what the user just said, and it can quote the
- * id back so the reinforce pass can tell which memories were actually used.
- */
-export function formatCard(unit: MemoryUnit): string {
-  const header = [
-    `memory:${unit.id}`,
-    scopeLabel(unit.scope),
-    localDate(unit.provenance.occurredAt ?? unit.createdAt),
-    unit.granularity,
-  ].join(' | ')
-  return `[${header}]\n${unit.content}`
-}
+export { formatCard }
 
 function degradedNote(result: RetrievalResult): string {
   const broken = result.channels.filter(report => report.status === 'failed' || report.status === 'timeout')
@@ -55,17 +26,23 @@ export async function handleSearch(
 
 export async function handleSave(
   memory: MemoryService,
-  args: { content: string; scope: string },
+  args: { content: string; scope: string; kind?: string },
 ): Promise<string> {
-  const saved = await memory.save({ content: args.content, scope: args.scope, granularity: 'summary' })
+  const saved = await memory.save({
+    content: args.content,
+    scope: args.scope,
+    granularity: 'summary',
+    kind: args.kind ?? 'note',
+  })
   if (!saved) return '未写入：内容为空，或全部被密钥过滤规则拦下。'
   return `已记住（${saved.id}）：${saved.content}`
 }
 
-export function handleStatus(memory: MemoryService, warning?: string | null): string {
+export function handleStatus(memory: MemoryService, warning?: string | null, extra: string[] = []): string {
   const status = memory.status()
   return [
     ...(warning ? [warning] : []),
+    ...extra,
     `记忆条数：${status.units}`,
     `向量模型：${status.embedder}`,
     `词法索引：${status.lexicalIndex}`,

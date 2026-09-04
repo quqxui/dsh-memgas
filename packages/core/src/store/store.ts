@@ -14,11 +14,23 @@ export interface SearchOptions {
   scopes?: string[]
 }
 
+export interface ListOptions {
+  scopes: string[]
+  limit: number
+  kinds?: string[]
+}
+
 export interface MemoryStore {
   readonly capabilities: StoreCapabilities
   put(unit: MemoryUnit): void
   get(id: string): MemoryUnit | null
   countUnits(): number
+  /** Active units of the given scopes, most important first. */
+  listActive(opts: ListOptions): MemoryUnit[]
+  /** Record that these units were read; ids that no longer exist are ignored. */
+  touch(ids: string[], at: number): void
+  getMeta(key: string): string | null
+  setMeta(key: string, value: string): void
   putVector(id: string, embedderId: string, vector: Float32Array): void
   searchLexical(query: string, opts: SearchOptions): Candidate[]
   searchDense(vector: Float32Array, opts: SearchOptions & { embedderId: string }): Candidate[]
@@ -42,6 +54,8 @@ interface UnitRow {
   embedder_id: string | null
   provenance: string
   derived_from: string
+  kind: string | null
+  confidence: number | null
 }
 
 const SCHEMA = `
@@ -64,6 +78,10 @@ CREATE TABLE IF NOT EXISTS units (
   derived_from TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS units_scope_status ON units (scope, status);
+CREATE TABLE IF NOT EXISTS meta (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS vectors (
   id TEXT NOT NULL,
   embedder_id TEXT NOT NULL,
@@ -90,8 +108,16 @@ function rowToUnit(row: UnitRow): MemoryUnit {
     embedderId: row.embedder_id,
     provenance: JSON.parse(row.provenance),
     derivedFrom: JSON.parse(row.derived_from),
+    kind: row.kind,
+    confidence: row.confidence,
   }
 }
+
+/** Columns added after the first schema; applied to stores created before them. */
+const MIGRATIONS: { column: string; ddl: string }[] = [
+  { column: 'kind', ddl: 'ALTER TABLE units ADD COLUMN kind TEXT' },
+  { column: 'confidence', ddl: 'ALTER TABLE units ADD COLUMN confidence REAL' },
+]
 
 /** FTS5 treats bare punctuation and operators as syntax, so every token is quoted. */
 function quote(token: string): string {
@@ -108,8 +134,18 @@ class SqliteMemoryStore implements MemoryStore {
     this.db = new DatabaseSync(opts.path)
     this.db.exec('PRAGMA journal_mode = WAL')
     this.db.exec(SCHEMA)
+    this.migrate()
     this.capabilities = { lexicalIndex: opts.forceLexicalFallback ? 'memory' : this.tryCreateFts() }
     if (this.capabilities.lexicalIndex === 'memory') this.rebuildFallbackIndex()
+  }
+
+  private migrate(): void {
+    const existing = new Set(
+      (this.db.prepare('PRAGMA table_info(units)').all() as { name: string }[]).map(column => column.name),
+    )
+    for (const migration of MIGRATIONS) {
+      if (!existing.has(migration.column)) this.db.exec(migration.ddl)
+    }
   }
 
   private tryCreateFts(): 'fts5' | 'memory' {
@@ -149,21 +185,22 @@ class SqliteMemoryStore implements MemoryStore {
       .prepare(
         `INSERT INTO units (id, scope, granularity, content, created_at, updated_at, importance,
            access_count, last_accessed_at, status, superseded_by, version, prompt_version,
-           embedder_id, provenance, derived_from)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           embedder_id, provenance, derived_from, kind, confidence)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
          ON CONFLICT(id) DO UPDATE SET
            scope=excluded.scope, granularity=excluded.granularity, content=excluded.content,
            updated_at=excluded.updated_at, importance=excluded.importance,
            access_count=excluded.access_count, last_accessed_at=excluded.last_accessed_at,
            status=excluded.status, superseded_by=excluded.superseded_by, version=excluded.version,
            prompt_version=excluded.prompt_version, embedder_id=excluded.embedder_id,
-           provenance=excluded.provenance, derived_from=excluded.derived_from`,
+           provenance=excluded.provenance, derived_from=excluded.derived_from,
+           kind=excluded.kind, confidence=excluded.confidence`,
       )
       .run(
         unit.id, unit.scope, unit.granularity, unit.content, unit.createdAt, unit.updatedAt,
         unit.importance, unit.accessCount, unit.lastAccessedAt, unit.status, unit.supersededBy,
         unit.version, unit.promptVersion, unit.embedderId, JSON.stringify(unit.provenance),
-        JSON.stringify(unit.derivedFrom),
+        JSON.stringify(unit.derivedFrom), unit.kind ?? null, unit.confidence ?? null,
       )
 
     if (this.capabilities.lexicalIndex === 'fts5') {
@@ -186,6 +223,38 @@ class SqliteMemoryStore implements MemoryStore {
   countUnits(): number {
     const row = this.db.prepare('SELECT COUNT(*) AS n FROM units').get() as { n: number }
     return row.n
+  }
+
+  listActive(opts: ListOptions): MemoryUnit[] {
+    if (opts.scopes.length === 0) return []
+    const scopeIn = opts.scopes.map(() => '?').join(',')
+    const kindClause = opts.kinds?.length ? ` AND kind IN (${opts.kinds.map(() => '?').join(',')})` : ''
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM units WHERE status = 'active' AND scope IN (${scopeIn})${kindClause}
+         ORDER BY importance DESC, updated_at DESC LIMIT ?`,
+      )
+      .all(...opts.scopes, ...(opts.kinds ?? []), opts.limit) as unknown as UnitRow[]
+    return rows.map(rowToUnit)
+  }
+
+  touch(ids: string[], at: number): void {
+    if (ids.length === 0) return
+    const placeholders = ids.map(() => '?').join(',')
+    this.db
+      .prepare(`UPDATE units SET access_count = access_count + 1, last_accessed_at = ? WHERE id IN (${placeholders})`)
+      .run(at, ...ids)
+  }
+
+  getMeta(key: string): string | null {
+    const row = this.db.prepare('SELECT value FROM meta WHERE key = ?').get(key) as { value: string } | undefined
+    return row?.value ?? null
+  }
+
+  setMeta(key: string, value: string): void {
+    this.db
+      .prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+      .run(key, value)
   }
 
   putVector(id: string, embedderId: string, vector: Float32Array): void {
