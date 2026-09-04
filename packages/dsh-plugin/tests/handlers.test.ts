@@ -32,6 +32,18 @@ describe('formatCard', () => {
     expect(card).toContain('接口层统一用 zod 做参数校验')
   })
 
+  test('dates a memory in the reader\'s local time, not UTC', () => {
+    // Late-evening UTC falls on the next local day east of Greenwich.
+    const timestamp = Date.UTC(2026, 7, 29, 20, 0)
+    const local = new Date(timestamp)
+    const expected = [
+      local.getFullYear(),
+      String(local.getMonth() + 1).padStart(2, '0'),
+      String(local.getDate()).padStart(2, '0'),
+    ].join('-')
+    expect(formatCard(unit({ provenance: { occurredAt: timestamp } }))).toContain(expected)
+  })
+
   test('labels a global memory as global rather than printing the raw scope key', () => {
     expect(formatCard(unit({ scope: 'global' }))).toContain('global')
   })
@@ -77,5 +89,39 @@ describe('handleStatus', () => {
     expect(output).toContain('1')
     expect(output).toContain('lexical-v1')
     expect(output).toContain('fts5')
+  })
+})
+
+describe('handleSearch degradation notice', () => {
+  const serviceWith = (result: unknown) => ({
+    async search() { return result },
+    async save() { return null },
+    status() { return { units: 0, embedder: 'x', lexicalIndex: 'fts5' as const, redactions: 0 } },
+    close() {},
+  })
+
+  test('warns the model when a channel dropped out of a successful search', async () => {
+    const memory = serviceWith({
+      items: [{ unit: unit(), score: 1, contributions: [] }],
+      channels: [
+        { channel: 'lexical', status: 'ok', ms: 1, count: 1 },
+        { channel: 'dense', status: 'timeout', ms: 20, count: 0, reason: 'exceeded 20ms' },
+      ],
+      degraded: true,
+    })
+    const output = await handleSearch(memory as never, { query: 'zod', scope: 'project:p' })
+    expect(output).toContain('注意')
+    expect(output).toContain('dense(timeout)')
+  })
+
+  test('warns even when the degraded search found nothing', async () => {
+    const memory = serviceWith({
+      items: [],
+      channels: [{ channel: 'lexical', status: 'failed', ms: 1, count: 0, reason: 'index corrupt' }],
+      degraded: true,
+    })
+    const output = await handleSearch(memory as never, { query: 'zod', scope: 'project:p' })
+    expect(output).toContain('没有找到')
+    expect(output).toContain('lexical(failed)')
   })
 })

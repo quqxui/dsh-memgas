@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { randomBytes } from 'node:crypto'
 import type { Granularity, MemoryUnit, Provenance } from './types.ts'
 import { openStore, type MemoryStore } from './store/store.ts'
 import { LexicalEmbedder } from './embedding/lexical.ts'
@@ -64,7 +64,7 @@ class DefaultMemoryService implements MemoryService {
 
     const now = Date.now()
     const unit: MemoryUnit = {
-      id: `m_${randomUUID().slice(0, 12)}`,
+      id: `m_${randomBytes(5).toString('hex')}`,
       scope: input.scope,
       granularity: input.granularity ?? 'turn',
       content,

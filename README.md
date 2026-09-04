@@ -364,6 +364,7 @@ dsh-memgas/
 - `ctx.storageDomain` 是否适合存向量与大图，还是 core 自管 SQLite 更省事。M0 读完 storage 子系统文档后定。
 - 主动注入的触发点用 `agent/pre-step` waterfall 还是 `turn/start` 事件加 `agent.inject()`，M2 前对照 agent-lifecycle 文档确定。
 - 真实会话语料如何采集与脱敏（自用会话 vs 公开数据），这决定 M3 验收是否可信。
+- **发布前必须解决**：`dsh-memgas` 依赖 `@memgas/core` 的 `workspace:*`，打包时会重写成一个未发布的版本号，用户 `dsh plugin add dsh-memgas` 会装不上。两条路：把 `@memgas/core` 一并发到 npm（`memgas-mcp` 也要用它，倾向这条），或在构建时把 core 打进插件的 `lib/`。M5 前必须选定。
 - 是否要 Web UI 记忆浏览面板（client 包），还是先只做 `/memory` 命令。
 
 ## 引用

@@ -19,6 +19,12 @@ describe('MemoryService', () => {
     expect(memory.status().redactions).toBe(1)
   })
 
+  test('gives every memory a short hex id', async () => {
+    const memory = service()
+    const saved = await memory.save({ content: '一条记忆', scope: 'global' })
+    expect(saved!.id).toMatch(/^m_[0-9a-f]{10}$/)
+  })
+
   test('refuses to store content that is empty after trimming', async () => {
     const memory = service()
     expect(await memory.save({ content: '   ', scope: 'global' })).toBeNull()

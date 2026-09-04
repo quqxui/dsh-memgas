@@ -4,8 +4,14 @@ function scopeLabel(scope: string): string {
   return scope === 'global' ? 'global' : 'project'
 }
 
-function isoDate(timestamp: number): string {
-  return new Date(timestamp).toISOString().slice(0, 10)
+/** Local calendar date: the user reasons in their own timezone, not in UTC. */
+function localDate(timestamp: number): string {
+  const date = new Date(timestamp)
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-')
 }
 
 /**
@@ -19,7 +25,7 @@ export function formatCard(unit: MemoryUnit): string {
   const header = [
     `memory:${unit.id}`,
     scopeLabel(unit.scope),
-    isoDate(unit.provenance.occurredAt ?? unit.createdAt),
+    localDate(unit.provenance.occurredAt ?? unit.createdAt),
     unit.granularity,
   ].join(' | ')
   return `[${header}]\n${unit.content}`
