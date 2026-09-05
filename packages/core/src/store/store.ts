@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
-import type { MemoryUnit } from '../types.ts'
+import type { Granularity, MemoryUnit, UnitStatus } from '../types.ts'
 import type { Candidate } from '../retrieval/fusion.ts'
 import { cjkBigrams, latinTokens, tokenize } from '../text.ts'
 import { cosine } from '../embedding/vector.ts'
@@ -12,7 +12,31 @@ export interface StoreCapabilities {
 export interface SearchOptions {
   limit: number
   scopes?: string[]
+  granularities?: Granularity[]
 }
+
+export interface Edge {
+  from: string
+  to: string
+  weight: number
+  kind: string
+}
+
+export interface EdgeStats {
+  count: number
+  avgDegree: number
+  maxDegree: number
+}
+
+export interface UnitQuery {
+  scopes: string[]
+  limit: number
+  statuses?: UnitStatus[]
+  granularities?: Granularity[]
+  kinds?: string[]
+}
+
+export type UnitPatch = Partial<Pick<MemoryUnit, 'status' | 'supersededBy' | 'importance' | 'version' | 'updatedAt' | 'content' | 'confidence'>>
 
 export interface ListOptions {
   scopes: string[]
@@ -27,6 +51,21 @@ export interface MemoryStore {
   countUnits(): number
   /** Active units of the given scopes, most important first. */
   listActive(opts: ListOptions): MemoryUnit[]
+  /** Units matching the query, most important first. */
+  listUnits(query: UnitQuery): MemoryUnit[]
+  /** Change mutable bookkeeping fields without rewriting the unit. */
+  patch(id: string, fields: UnitPatch): void
+  /** Physically remove one unit with its vectors and edges. */
+  remove(id: string): void
+  /** Mark a unit as user-pinned so automatic sweeps leave it alone. */
+  pin(id: string): void
+  /** Physically delete every unit, vector and edge of one scope. */
+  purgeScope(scope: string): void
+  putEdge(edge: Edge): void
+  deleteEdge(edge: Pick<Edge, 'from' | 'to' | 'kind'>): void
+  /** Every edge touching any of the ids, from either side. */
+  edges(ids: string[], opts?: { kinds?: string[] }): Edge[]
+  edgeStats(kind: string): EdgeStats
   /** Record that these units were read; ids that no longer exist are ignored. */
   touch(ids: string[], at: number): void
   getMeta(key: string): string | null
@@ -82,6 +121,14 @@ CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS edges (
+  from_id TEXT NOT NULL,
+  to_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  weight REAL NOT NULL,
+  PRIMARY KEY (from_id, to_id, kind)
+);
+CREATE INDEX IF NOT EXISTS edges_to ON edges (to_id);
 CREATE TABLE IF NOT EXISTS vectors (
   id TEXT NOT NULL,
   embedder_id TEXT NOT NULL,
@@ -203,6 +250,10 @@ class SqliteMemoryStore implements MemoryStore {
         JSON.stringify(unit.derivedFrom), unit.kind ?? null, unit.confidence ?? null,
       )
 
+    this.index(unit)
+  }
+
+  private index(unit: MemoryUnit): void {
     if (this.capabilities.lexicalIndex === 'fts5') {
       this.db.prepare('DELETE FROM units_fts WHERE id = ?').run(unit.id)
       const tokens = tokenize(unit.content)
@@ -226,16 +277,121 @@ class SqliteMemoryStore implements MemoryStore {
   }
 
   listActive(opts: ListOptions): MemoryUnit[] {
-    if (opts.scopes.length === 0) return []
-    const scopeIn = opts.scopes.map(() => '?').join(',')
+    return this.listUnits({ ...opts, statuses: ['active'] })
+  }
+
+  listUnits(query: UnitQuery): MemoryUnit[] {
+    if (query.scopes.length === 0) return []
+    const clauses: string[] = [`scope IN (${query.scopes.map(() => '?').join(',')})`]
+    const params: unknown[] = [...query.scopes]
+    const addIn = (column: string, values: string[] | undefined) => {
+      if (!values?.length) return
+      clauses.push(`${column} IN (${values.map(() => '?').join(',')})`)
+      params.push(...values)
+    }
+    addIn('status', query.statuses)
+    addIn('granularity', query.granularities)
+    addIn('kind', query.kinds)
+    const rows = this.db
+      .prepare(`SELECT * FROM units WHERE ${clauses.join(' AND ')} ORDER BY importance DESC, updated_at DESC LIMIT ?`)
+      .all(...(params as never[]), query.limit) as unknown as UnitRow[]
+    return rows.map(rowToUnit)
+  }
+
+  patch(id: string, fields: UnitPatch): void {
+    const columns: Record<keyof UnitPatch, string> = {
+      status: 'status',
+      supersededBy: 'superseded_by',
+      importance: 'importance',
+      version: 'version',
+      updatedAt: 'updated_at',
+      content: 'content',
+      confidence: 'confidence',
+    }
+    const sets: string[] = []
+    const params: unknown[] = []
+    for (const [key, value] of Object.entries(fields) as [keyof UnitPatch, unknown][]) {
+      if (value === undefined) continue
+      sets.push(`${columns[key]} = ?`)
+      params.push(value)
+    }
+    if (sets.length === 0) return
+    this.db.prepare(`UPDATE units SET ${sets.join(', ')} WHERE id = ?`).run(...(params as never[]), id)
+    if (fields.content !== undefined) {
+      const unit = this.get(id)
+      if (unit) this.index(unit)
+    }
+  }
+
+  pin(id: string): void {
+    this.db.prepare("UPDATE units SET kind = 'pinned' WHERE id = ?").run(id)
+  }
+
+  remove(id: string): void {
+    this.db.prepare('DELETE FROM edges WHERE from_id = ? OR to_id = ?').run(id, id)
+    this.db.prepare('DELETE FROM vectors WHERE id = ?').run(id)
+    if (this.capabilities.lexicalIndex === 'fts5') {
+      this.db.prepare('DELETE FROM units_fts WHERE id = ?').run(id)
+    } else {
+      for (const bucket of this.fallbackIndex.values()) bucket.delete(id)
+    }
+    this.db.prepare('DELETE FROM units WHERE id = ?').run(id)
+  }
+
+  purgeScope(scope: string): void {
+    const ids = (this.db.prepare('SELECT id FROM units WHERE scope = ?').all(scope) as { id: string }[]).map(row => row.id)
+    if (ids.length === 0) return
+    const placeholders = ids.map(() => '?').join(',')
+    this.db.prepare(`DELETE FROM edges WHERE from_id IN (${placeholders}) OR to_id IN (${placeholders})`).run(...ids, ...ids)
+    this.db.prepare(`DELETE FROM vectors WHERE id IN (${placeholders})`).run(...ids)
+    if (this.capabilities.lexicalIndex === 'fts5') {
+      this.db.prepare(`DELETE FROM units_fts WHERE id IN (${placeholders})`).run(...ids)
+    } else {
+      for (const bucket of this.fallbackIndex.values()) for (const id of ids) bucket.delete(id)
+    }
+    this.db.prepare(`DELETE FROM units WHERE id IN (${placeholders})`).run(...ids)
+  }
+
+  putEdge(edge: Edge): void {
+    this.db
+      .prepare(
+        `INSERT INTO edges (from_id, to_id, kind, weight) VALUES (?,?,?,?)
+         ON CONFLICT(from_id, to_id, kind) DO UPDATE SET weight = excluded.weight`,
+      )
+      .run(edge.from, edge.to, edge.kind, edge.weight)
+  }
+
+  deleteEdge(edge: Pick<Edge, 'from' | 'to' | 'kind'>): void {
+    this.db.prepare('DELETE FROM edges WHERE from_id = ? AND to_id = ? AND kind = ?').run(edge.from, edge.to, edge.kind)
+  }
+
+  edges(ids: string[], opts: { kinds?: string[] } = {}): Edge[] {
+    if (ids.length === 0) return []
+    const placeholders = ids.map(() => '?').join(',')
     const kindClause = opts.kinds?.length ? ` AND kind IN (${opts.kinds.map(() => '?').join(',')})` : ''
     const rows = this.db
       .prepare(
-        `SELECT * FROM units WHERE status = 'active' AND scope IN (${scopeIn})${kindClause}
-         ORDER BY importance DESC, updated_at DESC LIMIT ?`,
+        `SELECT from_id, to_id, kind, weight FROM edges
+         WHERE (from_id IN (${placeholders}) OR to_id IN (${placeholders}))${kindClause}`,
       )
-      .all(...opts.scopes, ...(opts.kinds ?? []), opts.limit) as unknown as UnitRow[]
-    return rows.map(rowToUnit)
+      .all(...ids, ...ids, ...(opts.kinds ?? [])) as { from_id: string; to_id: string; kind: string; weight: number }[]
+    return rows.map(row => ({ from: row.from_id, to: row.to_id, kind: row.kind, weight: row.weight }))
+  }
+
+  edgeStats(kind: string): EdgeStats {
+    const rows = this.db
+      .prepare(
+        `SELECT node, COUNT(*) AS degree FROM (
+           SELECT from_id AS node FROM edges WHERE kind = ?
+           UNION ALL
+           SELECT to_id AS node FROM edges WHERE kind = ?
+         ) GROUP BY node`,
+      )
+      .all(kind, kind) as { node: string; degree: number }[]
+    const count = (this.db.prepare('SELECT COUNT(*) AS n FROM edges WHERE kind = ?').get(kind) as { n: number }).n
+    const maxDegree = rows.reduce((max, row) => Math.max(max, row.degree), 0)
+    const avgDegree = rows.length ? rows.reduce((sum, row) => sum + row.degree, 0) / rows.length : 0
+    return { count, avgDegree, maxDegree }
   }
 
   touch(ids: string[], at: number): void {
@@ -322,13 +478,16 @@ class SqliteMemoryStore implements MemoryStore {
 
   searchDense(vector: Float32Array, opts: SearchOptions & { embedderId: string }): Candidate[] {
     const scopeClause = opts.scopes?.length ? ` AND u.scope IN (${opts.scopes.map(() => '?').join(',')})` : ''
+    const granClause = opts.granularities?.length
+      ? ` AND u.granularity IN (${opts.granularities.map(() => '?').join(',')})`
+      : ''
     const rows = this.db
       .prepare(
         `SELECT v.id AS id, v.data AS data FROM vectors v
          JOIN units u ON u.id = v.id
-         WHERE v.embedder_id = ? AND u.status = 'active'${scopeClause}`,
+         WHERE v.embedder_id = ? AND u.status = 'active'${scopeClause}${granClause}`,
       )
-      .all(opts.embedderId, ...(opts.scopes ?? [])) as { id: string; data: Uint8Array }[]
+      .all(opts.embedderId, ...(opts.scopes ?? []), ...(opts.granularities ?? [])) as { id: string; data: Uint8Array }[]
 
     return rows
       .map(row => ({

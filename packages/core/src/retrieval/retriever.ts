@@ -10,12 +10,20 @@ export interface RetrievalRequest {
   budgetMs?: number
 }
 
-/** One way of proposing memories for a query. Channels never see each other. */
+/** What a channel may see of the round it takes part in. */
+export interface ChannelContext {
+  /** Results the baseline channels already produced; only expansion channels use it. */
+  baseline: ChannelResult[]
+}
+
+/** One way of proposing memories for a query. */
 export interface RetrievalChannel {
   name: string
   /** Baseline channels are never skipped and own a reserved share of the results. */
   baseline: boolean
-  retrieve(request: RetrievalRequest): Promise<Candidate[]>
+  /** Runs in a second wave, seeded by the baseline results. */
+  dependsOnBaseline?: boolean
+  retrieve(request: RetrievalRequest, context?: ChannelContext): Promise<Candidate[]>
 }
 
 export interface ChannelReport {
@@ -102,7 +110,7 @@ export class Retriever {
     const reports: ChannelReport[] = []
     const results: ChannelResult[] = []
 
-    const runs = this.opts.channels.map(async channel => {
+    const runChannel = async (channel: RetrievalChannel, context?: ChannelContext) => {
       if (coldStart && !channel.baseline) {
         reports.push({ channel: channel.name, status: 'skipped', ms: 0, count: 0, reason: 'cold start' })
         return
@@ -110,7 +118,7 @@ export class Retriever {
       const started = Date.now()
       try {
         const budget = Math.min(this.opts.channelTimeoutMs, this.opts.budgetMs, request.budgetMs ?? Infinity)
-        const candidates = await withTimeout(channel.retrieve(request), budget)
+        const candidates = await withTimeout(channel.retrieve(request, context), budget)
         results.push({ channel: channel.name, candidates })
         reports.push({ channel: channel.name, status: 'ok', ms: Date.now() - started, count: candidates.length })
       } catch (error) {
@@ -123,9 +131,19 @@ export class Retriever {
           reason: error instanceof Error ? error.message : String(error),
         })
       }
-    })
+    }
 
-    await Promise.all(runs)
+    // Two waves: expansion channels need the baseline hits as their seeds.
+    const [expansion, independent] = [
+      this.opts.channels.filter(channel => channel.dependsOnBaseline),
+      this.opts.channels.filter(channel => !channel.dependsOnBaseline),
+    ]
+    await Promise.all(independent.map(channel => runChannel(channel)))
+    if (expansion.length > 0) {
+      const baseline = results.filter(result =>
+        this.opts.channels.find(channel => channel.name === result.channel)?.baseline)
+      await Promise.all(expansion.map(channel => runChannel(channel, { baseline })))
+    }
 
     const fused = fuseRRF(results, { weights: this.opts.weights })
     const baselineChannels = this.opts.channels.filter(channel => channel.baseline).map(channel => channel.name)

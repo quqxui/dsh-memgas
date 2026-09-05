@@ -20,12 +20,20 @@ const extraction = JSON.stringify({
   keywords: ['store.ts'],
 })
 
+interface RegisteredCommand {
+  name: string
+  description: string
+  handler: (invocation: { rawInput: string; agent: unknown }) => Promise<{ kind: string; text?: string }>
+}
+
 function fakeContext() {
   const tools: RegisteredTool[] = []
+  const commands: RegisteredCommand[] = []
   const sections: { name: string; order: number; text: string | (() => string) }[] = []
   const listeners = new Map<string, ((...args: unknown[]) => unknown)[]>()
   return {
     tools: { register: (definition: RegisteredTool) => { tools.push(definition); return () => {} } },
+    commands: { register: (definition: RegisteredCommand) => { commands.push(definition); return () => {} } },
     systemPrompt: { section: (section: { name: string; order: number; text: string | (() => string) }) => { sections.push(section); return () => {} } },
     llm: { async *stream() { yield { type: 'text-delta', text: extraction } } },
     on: (event: string, listener: (...args: unknown[]) => unknown) => {
@@ -33,6 +41,7 @@ function fakeContext() {
       return () => {}
     },
     registered: tools,
+    registeredCommands: commands,
     sections,
     fire: (event: string, ...args: unknown[]) => Promise.all((listeners.get(event) ?? []).map(listener => listener(...args))),
   }
@@ -51,7 +60,7 @@ async function runTurn(ctx: ReturnType<typeof fakeContext>, sessionId: string, t
 
 describe('plugin manifest', () => {
   test('declares the services it reaches for, or Cordis refuses the context access', () => {
-    expect(inject).toEqual(expect.arrayContaining(['tools', 'systemPrompt', 'llm']))
+    expect(inject).toEqual(expect.arrayContaining(['tools', 'systemPrompt', 'llm', 'commands']))
   })
 })
 
@@ -165,6 +174,70 @@ describe('profile section', () => {
     expect(render()).toBe('')
     await ctx.registered.find(tool => tool.name === 'memory_save')!.execute({ content: '回复一律用中文', global: true }, {})
     expect(render()).toContain('回复一律用中文')
+  })
+})
+
+describe('the /memory command', () => {
+  test('is registered and answers help', async () => {
+    const ctx = fakeContext()
+    apply(ctx as never, { dataDir: ':memory:' })
+    const command = ctx.registeredCommands.find(c => c.name === 'memory')!
+    const result = await command.handler({ rawInput: '', agent: {} })
+    expect(result.kind).toBe('success')
+    expect(result.text).toContain('search')
+  })
+
+  test('reports the same status text the tool reports', async () => {
+    const ctx = fakeContext()
+    apply(ctx as never, { dataDir: ':memory:' })
+    const command = ctx.registeredCommands.find(c => c.name === 'memory')!
+    const viaCommand = await command.handler({ rawInput: 'status', agent: {} })
+    const viaTool = String(await ctx.registered.find(t => t.name === 'memory_status')!.execute({}, {}))
+    expect(viaCommand.text).toBe(viaTool)
+  })
+})
+
+describe('per-session scope', () => {
+  test('uses the working directory of the session that raised the event', async () => {
+    const ctx = fakeContext()
+    const handle = apply(ctx as never, { dataDir: ':memory:', minTurnChars: 10 })
+    const session = { id: 's1', cwd: '/tmp/other-project' }
+    await ctx.fire('session/event', session, { type: 'turn/start', data: { turn: 1 } })
+    expect(handle.scopeForSession('s1')).toMatch(/^project:/)
+    expect(handle.scopeForSession('s1')).not.toBe(handle.scopeForSession('unknown-session'))
+  })
+
+  test('falls back to the process directory for a session without one', async () => {
+    const ctx = fakeContext()
+    const handle = apply(ctx as never, { dataDir: ':memory:' })
+    expect(handle.scopeForSession('never-seen')).toBe(handle.defaultScope)
+  })
+})
+
+describe('evolution wiring', () => {
+  test('reinforces a memory that the assistant cited back', async () => {
+    const ctx = fakeContext()
+    const handle = apply(ctx as never, { dataDir: ':memory:', recall: true, harvest: false })
+    await ctx.registered.find(t => t.name === 'memory_save')!.execute({ content: '接口层统一用 zod 做参数校验' }, {})
+    const saved = handle.memory.store.listActive({ scopes: [handle.defaultScope], limit: 1 })[0]!
+    const before = saved.importance
+
+    const decision = { kind: 'enter' as const, messages: [userMessage('用 zod 做参数校验')] }
+    await ctx.fire('agent/pre-step', { agent: {}, messages: decision.messages, turn: 1, step: 1 }, async () => decision)
+    await ctx.fire('session/event', { id: 's1' }, {
+      type: 'assistant/message',
+      data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: `照 memory:${saved.id} 的约定来` }] } },
+    })
+    await handle.idle()
+    expect(handle.memory.store.get(saved.id)!.importance).toBeGreaterThan(before)
+  })
+
+  test('sweeps once per session start', async () => {
+    const ctx = fakeContext()
+    const handle = apply(ctx as never, { dataDir: ':memory:', evolve: true })
+    await ctx.fire('agent/session-start', { agent: { session: { id: 's1' } }, source: 'startup' })
+    await handle.idle()
+    expect(handle.evolutionStats().archived).toBe(0)
   })
 })
 

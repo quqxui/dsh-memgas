@@ -30,6 +30,12 @@ importers:
         specifier: ^4.0.2
         version: 4.0.2
 
+  packages/mcp:
+    dependencies:
+      '@memgas/core':
+        specifier: workspace:*
+        version: link:../core
+
 packages:
 
   '@deepseek-ai/cordis@4.0.2':

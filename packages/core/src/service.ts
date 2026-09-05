@@ -4,8 +4,12 @@ import { openStore, type MemoryStore } from './store/store.ts'
 import { LexicalEmbedder } from './embedding/lexical.ts'
 import type { Embedder } from './embedding/types.ts'
 import { redactSecrets } from './secrets.ts'
-import { Retriever, type RetrievalResult } from './retrieval/retriever.ts'
+import { Retriever, type RetrievalChannel, type RetrievalResult } from './retrieval/retriever.ts'
 import { denseChannel, lexicalChannel } from './retrieval/channels.ts'
+import { granularityChannel } from './retrieval/granularity-channel.ts'
+import { graphChannel, type GraphChannel, type GraphChannelOptions } from './retrieval/graph-channel.ts'
+import { retrievalProfile, type RetrievalMode, type RetrievalOverrides } from './retrieval/modes.ts'
+import { associate } from './graph/association.ts'
 
 export interface SaveInput {
   content: string
@@ -21,13 +25,25 @@ export interface MemoryStatus {
   embedder: string
   lexicalIndex: 'fts5' | 'memory'
   redactions: number
+  mode: RetrievalMode
+  channels: string[]
+  graph: { edges: number; status: string }
+}
+
+export interface SearchRequest {
+  query: string
+  scopes?: string[]
+  k?: number
+  budgetMs?: number
+  /** Overrides the configured mode for this call only. */
+  mode?: RetrievalMode
 }
 
 export interface MemoryService {
   readonly store: MemoryStore
   readonly embedder: Embedder
   save(input: SaveInput): Promise<MemoryUnit | null>
-  search(request: { query: string; scopes?: string[]; k?: number; budgetMs?: number }): Promise<RetrievalResult>
+  search(request: SearchRequest): Promise<RetrievalResult>
   status(): MemoryStatus
   close(): void
 }
@@ -37,27 +53,56 @@ export interface MemoryServiceOptions {
   embedder?: Embedder
   store?: MemoryStore
   coldStartUnits?: number
-  baselineFloor?: number
-  weights?: Record<string, number>
+  mode?: RetrievalMode
+  overrides?: RetrievalOverrides
+  /** Entropy temperature of the granularity router. */
+  lambda?: number
+  /** Build association edges when a memory is saved. */
+  associateOnSave?: boolean
+  graph?: GraphChannelOptions
 }
 
 class DefaultMemoryService implements MemoryService {
   readonly store: MemoryStore
   readonly embedder: Embedder
-  private readonly retriever: Retriever
+  private readonly retrievers = new Map<RetrievalMode, Retriever>()
+  private readonly graph: GraphChannel
+  private readonly options: MemoryServiceOptions
   private redactions = 0
 
   constructor(options: MemoryServiceOptions) {
+    this.options = options
     this.store = options.store ?? openStore({ path: options.path })
     this.embedder = options.embedder ?? new LexicalEmbedder()
-    this.retriever = new Retriever({
+    this.graph = graphChannel(this.store, options.graph ?? {})
+  }
+
+  private retrieverFor(mode: RetrievalMode): Retriever {
+    const existing = this.retrievers.get(mode)
+    if (existing) return existing
+
+    const profile = retrievalProfile(mode, this.options.overrides ?? {})
+    const channels: RetrievalChannel[] = []
+    const weights: Record<string, number> = {}
+    const add = (channel: RetrievalChannel, setting: { enabled: boolean; weight: number }) => {
+      if (!setting.enabled) return
+      channels.push(channel)
+      weights[channel.name] = setting.weight
+    }
+    add(lexicalChannel(this.store), profile.channels.lexical)
+    add(denseChannel(this.store, this.embedder), profile.channels.dense)
+    add(granularityChannel(this.store, this.embedder, { lambda: this.options.lambda ?? 0.1 }), profile.channels.granularity)
+    add(this.graph, profile.channels.graph)
+
+    const retriever = new Retriever({
       store: this.store,
-      channels: [lexicalChannel(this.store), denseChannel(this.store, this.embedder)],
-      // Baseline channels only, so cold start has nothing to hold back yet.
-      coldStartUnits: options.coldStartUnits ?? 0,
-      baselineFloor: options.baselineFloor ?? 0.5,
-      weights: options.weights ?? {},
+      channels,
+      coldStartUnits: this.options.coldStartUnits ?? 0,
+      baselineFloor: profile.baselineFloor,
+      weights,
     })
+    this.retrievers.set(mode, retriever)
+    return retriever
   }
 
   async save(input: SaveInput): Promise<MemoryUnit | null> {
@@ -90,20 +135,41 @@ class DefaultMemoryService implements MemoryService {
 
     this.store.put(unit)
     const [vector] = await this.embedder.embed([content])
-    if (vector) this.store.putVector(unit.id, this.embedder.id, vector)
+    if (vector) {
+      this.store.putVector(unit.id, this.embedder.id, vector)
+      if (this.options.associateOnSave) {
+        try {
+          associate(this.store, {
+            unitId: unit.id,
+            scope: unit.scope,
+            embedderId: this.embedder.id,
+            vector,
+          })
+        } catch {
+          // A memory that could not be linked is still a memory.
+        }
+      }
+    }
     return unit
   }
 
-  async search(request: { query: string; scopes?: string[]; k?: number; budgetMs?: number }): Promise<RetrievalResult> {
-    return this.retriever.retrieve(request)
+  async search(request: SearchRequest): Promise<RetrievalResult> {
+    const mode = request.mode ?? this.options.mode ?? 'hybrid'
+    return this.retrieverFor(mode).retrieve(request)
   }
 
   status(): MemoryStatus {
+    const mode = this.options.mode ?? 'hybrid'
+    const profile = retrievalProfile(mode, this.options.overrides ?? {})
+    const health = this.graph.health()
     return {
       units: this.store.countUnits(),
       embedder: this.embedder.id,
       lexicalIndex: this.store.capabilities.lexicalIndex,
       redactions: this.redactions,
+      mode,
+      channels: Object.entries(profile.channels).filter(([, setting]) => setting.enabled).map(([name]) => name),
+      graph: { edges: health.edges, status: health.status },
     }
   }
 

@@ -131,3 +131,67 @@ describe('MemoryStore extensions', () => {
     expect(store.listActive({ scopes: ['global'], limit: 10, kinds: ['preference'] }).map(u => u.id)).toEqual(['pref'])
   })
 })
+
+describe('MemoryStore graph and unit patching', () => {
+  let store: MemoryStore
+
+  beforeEach(() => {
+    store = openStore({ path: ':memory:' })
+  })
+
+  test('dense search can be limited to granularities', () => {
+    store.put(unit({ id: 'k', content: 'a', granularity: 'keyword', embedderId: 'e' }))
+    store.put(unit({ id: 't', content: 'b', granularity: 'turn', embedderId: 'e' }))
+    store.putVector('k', 'e', Float32Array.from([1, 0]))
+    store.putVector('t', 'e', Float32Array.from([1, 0]))
+    expect(store.searchDense(Float32Array.from([1, 0]), { embedderId: 'e', limit: 5, granularities: ['keyword'] }).map(c => c.id)).toEqual(['k'])
+  })
+
+  test('upserts edges and lists every edge touching the given ids', () => {
+    store.putEdge({ from: 'a', to: 'b', weight: 0.5, kind: 'association' })
+    store.putEdge({ from: 'a', to: 'b', weight: 0.9, kind: 'association' })
+    store.putEdge({ from: 'b', to: 'c', weight: 0.2, kind: 'coRetrieval' })
+    const edges = store.edges(['a'])
+    expect(edges).toEqual([{ from: 'a', to: 'b', weight: 0.9, kind: 'association' }])
+    expect(store.edges(['b'], { kinds: ['coRetrieval'] })).toHaveLength(1)
+  })
+
+  test('reports edge statistics for health checks', () => {
+    store.putEdge({ from: 'a', to: 'b', weight: 1, kind: 'association' })
+    store.putEdge({ from: 'a', to: 'c', weight: 1, kind: 'association' })
+    store.putEdge({ from: 'a', to: 'd', weight: 1, kind: 'association' })
+    const stats = store.edgeStats('association')
+    expect(stats).toMatchObject({ count: 3, maxDegree: 3 })
+    expect(stats.avgDegree).toBeCloseTo(1.5)
+  })
+
+  test('deletes a single edge', () => {
+    store.putEdge({ from: 'a', to: 'b', weight: 1, kind: 'association' })
+    store.deleteEdge({ from: 'a', to: 'b', kind: 'association' })
+    expect(store.edges(['a'])).toEqual([])
+  })
+
+  test('patches mutable fields of a unit in place', () => {
+    store.put(unit({ id: 'm1', content: 'c' }))
+    store.patch('m1', { status: 'superseded', supersededBy: 'm2', importance: 0.1 })
+    expect(store.get('m1')).toMatchObject({ status: 'superseded', supersededBy: 'm2', importance: 0.1, content: 'c' })
+  })
+
+  test('lists units filtered by status and granularity', () => {
+    store.put(unit({ id: 'a', content: 'a', status: 'pending', granularity: 'summary' }))
+    store.put(unit({ id: 'b', content: 'b', status: 'active', granularity: 'summary' }))
+    store.put(unit({ id: 'c', content: 'c', status: 'active', granularity: 'turn' }))
+    expect(store.listUnits({ scopes: ['project:github.com/a/b'], statuses: ['pending'], limit: 10 }).map(u => u.id)).toEqual(['a'])
+    expect(store.listUnits({ scopes: ['project:github.com/a/b'], statuses: ['active'], granularities: ['turn'], limit: 10 }).map(u => u.id)).toEqual(['c'])
+  })
+
+  test('purges every unit, vector and edge of a scope', () => {
+    store.put(unit({ id: 'a', content: 'a', scope: 'project:x' }))
+    store.put(unit({ id: 'b', content: 'b', scope: 'global' }))
+    store.putEdge({ from: 'a', to: 'b', weight: 1, kind: 'association' })
+    store.purgeScope('project:x')
+    expect(store.get('a')).toBeNull()
+    expect(store.get('b')).not.toBeNull()
+    expect(store.edges(['a'])).toEqual([])
+  })
+})

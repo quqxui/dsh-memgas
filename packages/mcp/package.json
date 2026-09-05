@@ -1,0 +1,32 @@
+{
+  "name": "memgas-mcp",
+  "version": "0.0.1",
+  "description": "MCP server exposing a memgas memory store to any agent.",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "bin": {
+    "memgas-mcp": "lib/bin.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    }
+  },
+  "files": [
+    "lib"
+  ],
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "keywords": [
+    "mcp",
+    "memory",
+    "memgas"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@memgas/core": "workspace:*"
+  }
+}

@@ -37,6 +37,8 @@ export interface HarvesterOptions {
   cwd?: string
   gitBranch?: string
   now?: () => number
+  /** Called for every stored unit so the evolution processes can pick it up. */
+  onUnitStored?: (id: string) => void
 }
 
 interface SessionState {
@@ -197,6 +199,11 @@ export class Harvester {
   private async persist(units: MemoryUnit[]): Promise<void> {
     if (units.length === 0) return
     for (const unit of units) this.opts.store.put(unit)
+    for (const unit of units) {
+      // Only structured facts are worth reconciling; raw turns and keyword
+      // lists have no counterpart to compare against.
+      if (unit.granularity === 'summary' && unit.kind) this.opts.onUnitStored?.(unit.id)
+    }
     const vectors = await this.opts.embedder.embed(units.map(unit => unit.content))
     units.forEach((unit, index) => {
       const vector = vectors[index]

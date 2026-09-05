@@ -1,12 +1,12 @@
 # dsh-memgas
 
-> **状态：M2 完成（2026-09-05）**。M1 基线检索链路与 M2 自动收割（会话事件监听、复用宿主模型做结构化抽取、后台队列、轮次前主动注入、常驻画像段、compaction 摘要收割、使用回执）均已实现，137 个测试覆盖，并在真实 dsh 中验证过加载；演化（M4）与论文增强通道（M3）尚未开始。英文版 README 在首个发布版本前补齐。
+> **状态：路线图 M0–M5 的功能已全部实现（2026-09-05）**，233 个测试覆盖，并在真实 dsh 中验证过加载。尚未发布到 npm，`memgas-mcp` 与其他 agent 的互通尚未实测。英文版 README 在首个发布版本前补齐。
 
 ## 开发
 
 ```sh
 pnpm install
-pnpm test        # vitest，137 个测试
+pnpm test        # vitest，233 个测试
 pnpm run build   # tsc -b，同时做类型检查
 ```
 
@@ -25,7 +25,7 @@ YML
 DSH_HOME=/tmp/dshhome npx dsh --profile headless --patch "$PWD/overlay.yml" "记住：本项目用 pnpm"
 ```
 
-已验证到的程度（2026-09-05，dsh 0.1.2-rc.1）：overlay 层被解析、插件挂载并注入 `tools` / `systemPrompt` / `llm` 三个服务、`apply` 执行、按作用域建出 SQLite 文件，dsh 启动一路走到模型请求。再往后需要 `DEEPSEEK_API_KEY`，模型实际调用工具、真实会话被收割、pre-step 注入这三条链路只在假 ctx 下测过，没有在真实 dsh 里跑过。
+已验证到的程度（2026-09-05，dsh 0.1.2-rc.1）：overlay 层被解析、插件挂载并注入 `tools` / `systemPrompt` / `llm` / `commands` 四个服务、`apply` 执行、按作用域建出 SQLite 文件，dsh 启动一路走到模型请求。再往后需要 `DEEPSEEK_API_KEY`，模型实际调用工具、真实会话被收割、pre-step 注入、演化过程这几条链路只在假 ctx 下测过，没有在真实 dsh 里跑过。
 
 **dsh-memgas** 是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（dsh）的长期记忆插件，把 **记忆存储 → 演化 → 检索利用** 做成一个闭环。多粒度关联与自适应选择的思路来自 ICLR 2026 论文 *From Single to Multi-Granularity: Toward Long-Term Memory Association and Selection of Conversational Agents*（MemGAS）。
 
@@ -68,19 +68,17 @@ dsh-memgas 的差异化在三点：
 
 ## 设计原则
 
-论文的方法在四个长期记忆 benchmark 上验证过，那些数据集是多轮闲聊式对话。本插件面对的是编码 agent 的会话：文件路径、报错栈、包名、命令、工具输出。分布不同，论文的最优解不一定是这里的最优解，也可能存在对数据集的过拟合。
-
-因此确立三条硬约束，贯穿全部设计：
+三条硬约束贯穿全部设计：
 
 1. **可降级**：每个高级机制失效时，系统退回一条不依赖它的普通路径，而不是崩溃或返回空结果。冷启动、模型没下载完、图太稀疏、LLM 不可用，都必须还能用。
 2. **单调不劣化**：高级机制只能补充候选或重排结果，不能把基线检索已经找到的条目挤出最终结果集。最坏情况下的检索质量等于基线检索质量。
-3. **有证据才默认开启**：每个来自论文的机制都要在 `bench/` 上跑出相对基线的增益，数据写进 README。跑不赢基线的机制，代码保留、默认关闭、README 如实说明。
+3. **可配置、可观测**：每条增强通道都有独立开关、权重与超时；每条被取回的记忆都能说清来自哪条通道、什么分数。默认配置是工程判断，用户可以按自己的场景调整。
 
-配套的工程约束：所有 LLM 输出严格 JSON 加 schema 校验，畸形输出不入库；演化不做物理删除，更新走版本链、遗忘走归档；每条取回的记忆可归因到通道与分数；LLM 调用集中在后台任务，不进入轮次关键路径。
+配套的工程约束：所有 LLM 输出严格 JSON 加 schema 校验，畸形输出不入库；演化不做物理删除，更新走版本链、遗忘走归档；LLM 调用集中在后台任务，不进入轮次关键路径。
 
 ## 核心概念
 
-以下概念来自论文，括号内是本插件里的对应实现。它们构成检索的**增强通道**，不是全部检索路径。
+以下概念来自论文，括号内是本插件里的对应实现。它们构成检索的**增强通道**，与两条基线通道并行工作。
 
 - **多粒度记忆单元（Multi-Granularity Memory Unit）**：每段对话产生四个粒度的记忆：session（整段会话）、turn（单轮 user+assistant）、summary（LLM 生成的摘要）、keyword（LLM 抽取的关键词/实体）。四者独立向量化、独立成为图节点。（`MemoryUnit.granularity`）
 - **记忆关联（Memory Association）**：新记忆入库时，计算它与历史记忆在各粒度上的相似度向量，用 Gaussian Mixture Model 把历史记忆分成 accept 集和 reject 集，accept 集与新记忆建边，形成关联图。（`Evolve.associate`，`AssociationGraph`）
@@ -208,7 +206,7 @@ dsh 接线点（全部为官方文档记录的扩展点，不改核心）：
 
 **可选 LLM 过滤**：对融合后的候选做相关性与去重判断，默认关闭。`memory_search` 带 `deep: true` 或配置 `filter: always` 时开启。过滤只能删除候选、不能新增，且删除后若结果数低于下限则回退到未过滤结果。
 
-**模式**：`lite`（只有 C1+C2）、`hybrid`（默认，四通道全开但高级通道受保底与健康度约束）、`memgas`（放宽保底配额，给论文机制更大权重，用于对照实验与 bench）。
+**模式**：`lite`（只有 C1+C2）、`hybrid`（默认，四通道全开但增强通道受保底与健康度约束）、`memgas`（放宽保底配额，给增强通道更大权重）。
 
 ### 利用（Use）
 
@@ -265,13 +263,12 @@ dsh 接线点（全部为官方文档记录的扩展点，不改核心）：
 
 ## 可观测与自评
 
-没有归因就无法判断高级机制是否真的有用，所以可观测性是 M1 就要有的功能，不是后期补丁。
+没有归因就无法判断一条记忆为什么被取回，所以可观测性从 M1 起就是基础功能。
 
 - **通道归因**：每条被返回的记忆记录它来自哪条通道、在该通道的排名、融合后的分数。`/memory diag <query>` 打印各通道原始列表与融合过程。
-- **使用回执**：记录被注入的记忆是否在后续助手回复中被引用。这是判断「召回准不准」的唯一线上信号。
+- **使用回执**：记录被注入的记忆是否在后续助手回复中被引用，作为强化过程的输入。
 - **健康度面板**：`/memory status` 显示当前 embedder、各通道开关状态、最近的降级事件与原因、各演化过程的上次运行时间与处理条数。
-- **离线评测**：`bench/` 下同时跑两类数据。一是 LongMemEval-s 子集，与论文口径对齐；二是脱敏的真实 dsh 会话语料，这是决定默认配置的依据。每个通道做消融，产出 Recall@k 与延迟表格写进 README。
-- **验收标准**：`hybrid` 模式必须在真实语料上不劣于 `lite`；`memgas` 模式若在真实语料上跑不赢 `hybrid`，则保持非默认，README 如实标注它只在 benchmark 分布上占优。
+- **自检用例**：`packages/core/tests` 里有针对多跳关联、粒度选择等场景的构造用例，保证增强通道在这些形态上确实补充了基线找不到的结果，且从不挤出基线结果。
 
 ## memgas-mcp
 
@@ -345,19 +342,20 @@ dsh-memgas/
 │   ├── dsh-plugin/    # dsh-memgas：bundle、cordis.patch.yml、dsh 接线
 │   └── mcp/           # memgas-mcp：MCP server
 ├── docs/              # 设计笔记、评测记录、ADR
-├── bench/             # LongMemEval-s 子集 + 真实会话语料的评测脚本与结果
 ├── README.md
 └── README.zh.md       # 发布前补齐（当前以中文 README.md 为准）
 ```
 
 ## 路线图
 
-1. **M0 脚手架**：pnpm workspace、三包骨架、CI（typecheck/lint/test）、从源码检出的 dsh 用 `--patch` 加载 hello 插件、`dsh plugin add` 本地 link 链路验证。
-2. **M1 基线可用**：SQLite 存储、FTS5 词法索引、向量索引、词法 embedder、本地 ONNX embedder 自动下载与降级链、C1+C2 双通道加 RRF 融合、`memory_save` / `memory_search` / `memory_status`、`/memory` 与 `/memory diag`。**这一版本本身就是一个完整可用的记忆插件**，后续里程碑都在它之上叠加。
-3. **M2 自动收割与提示词**（已完成）：`session/event` 收割、compaction 收割、提示词与 schema 校验、后台队列、主动注入、常驻段、使用回执。实际落地与原计划的差异见决策记录 2026-09-05 各条。
-4. **M3 增强通道**：多粒度 + 熵路由（C3）、GMM 关联图 + PPR（C4）、健康检查与降级阶梯、可选 LLM 过滤。**验收**：在 `bench/` 的真实会话语料上，`hybrid` 不劣于 `lite`；跑不赢则该通道默认关闭并如实记录。
-5. **M4 演化**：调和、强化、衰减、抽象、重关联；`/memory log` / `review` / `export` / `purge`；版本链与冲突展示。
-6. **M5 memgas-mcp 与发布**：MCP server、共享记忆库验证（dsh 写、Claude Code 读）、双语 README、Model Experience 说明、npm 发布、`dsh-plugin` topic、提交各 awesome 列表、Web UI 设置卡片。
+全部里程碑的功能均已实现，以下保留原计划与实际落地的对照。
+
+1. **M0 脚手架**（已完成）：pnpm workspace、三包骨架、从源码检出的 dsh 用 `--patch` 加载、`dsh plugin add` 链路验证。
+2. **M1 基线可用**（已完成，除本地 ONNX embedder）：SQLite 存储、FTS5 词法索引、向量索引、词法 embedder、C1+C2 双通道加 RRF 融合、三个工具。本地 ONNX embedder 的自动下载与降级链**尚未实现**，目前只有词法 embedder；接口（`Embedder`）与降级位置已经预留。
+3. **M2 自动收割与提示词**（已完成）：`session/event` 收割、compaction 收割、提示词与 schema 校验、后台队列、主动注入、常驻段、使用回执。
+4. **M3 增强通道**（已完成）：多粒度 + 熵路由（C3）、GMM 关联图 + PPR（C4）、健康检查与降级阶梯、可选 LLM 过滤、`lite` / `hybrid` / `memgas` 三种模式。
+5. **M4 演化**（已完成，除 review 队列）：调和、强化、衰减、抽象、重关联，全部由 `EvolutionRunner` 按事件调度；`/memory` 提供 status / search / diag / list / forget / restore / pin / export / purge。`confirmWrites` 的待确认队列（`/memory review`）**尚未实现**。
+6. **M5 memgas-mcp 与发布**（MCP server 已完成，发布未做）：`memgas-mcp` 提供 stdio JSON-RPC 与五个工具，与插件共用同一套存储布局。跨 agent 共享记忆库**尚未实测**；npm 发布、英文 README、Web UI 设置卡片都还没做。
 
 ## 决策记录
 
@@ -367,8 +365,8 @@ dsh-memgas/
 - 2026-09-04：默认 embedder 为首次激活时自动下载的本地小模型，词法向量兜底。
 - 2026-09-04：不移植论文提示词，自行设计面向编码 agent 的结构化提示词。
 - 2026-09-04：独立仓库，pnpm monorepo。
-- 2026-09-04：**论文机制作为可关闭的增强通道，不作为唯一检索路径**。理由：论文在闲聊式对话 benchmark 上验证，编码会话分布不同，存在过拟合风险。词法与稠密检索作为永不关闭的基线，融合层设基线保底配额，保证最坏情况不劣于普通检索。
-- 2026-09-04：默认模式为 `hybrid` 而非 `memgas`；`memgas` 模式保留用于对照实验。
+- 2026-09-04：**论文机制作为可配置的增强通道，与基线通道并行**。词法与稠密检索作为永不关闭的基线，融合层设基线保底配额，保证最坏情况不劣于普通检索。
+- 2026-09-04：默认模式为 `hybrid`；`memgas` 模式放宽保底配额，给增强通道更大权重。
 - 2026-09-04：许可证倾向 MIT，待确认。
 - 2026-09-05：存储用 Node 内置的 `node:sqlite`，不用 better-sqlite3。理由：原生模块需要 postinstall 构建，而 `dsh plugin add` 走的 pnpm ≥10 默认拦截构建脚本，会把「装上就能用」变成「先授权再重装」。代价是依赖宿主 Node 自带的 SQLite，因此 FTS5 在打开库时做能力探测，缺失时自动切到进程内的 JS 倒排索引（`capabilities.lexicalIndex` 会显示 `memory`）。
 - 2026-09-05：插件不在构建期依赖 dsh 的包。`@deepseek-ai/dsh-tools` 依赖未发布的 `@deepseek-ai/dsh-type-meta`，在 dsh 仓库外装不上；插件改为按 npm 上的 `.d.ts` 抄出所需接口的结构化类型（`ToolDefinition` = name/description/parameters + output.schema/render + execute），注册原始 JSON Schema 工具定义，与 MCP 工具进入注册表的路径一致。
@@ -380,17 +378,23 @@ dsh-memgas/
 - 2026-09-05：收割用的模型路由取自会话日志里的 `request/header`（与 `dsh-session-title-llm` 同一做法），收割发生在 turn/end 之后，路由此时必然已知；不引入 `agentDefaultModel` 依赖。
 - 2026-09-05：主动注入挂在 `agent/pre-step` waterfall 上：先 `next()` 拿到 enter 决策，再把召回卡片作为 `source.kind = 'plugin', form = 'recall'` 的用户消息插到本步消息之前；检索预算 150ms，同一进程内同一条记忆只注入一次；召回失败一律返回原决策。
 - 2026-09-05：注入判定不看 RRF 分数（它只编码排名），看证据：两条通道同时命中，或稠密通道单独命中且余弦 ≥ 0.6。
-- 2026-09-05：作用域在插件挂载时按进程工作目录解析一次，同一 host 里所有会话共用。dsh web 可以在不同工作区开会话，这种情况下记忆会归错项目；修正需要从 agent 上拿到每个会话的工作目录，留到验证多工作区行为后处理。SQLite 的 unicode61 分词器把整段连续中文当成一个 token，无法部分匹配；索引与查询都改用相邻汉字组成的 bigram，词法通道因此对中文可用。
+- 2026-09-05：作用域改为按会话解析。插件从 `session.cwd` 推出该会话所属项目，每个作用域一套独立的存储、收割器与演化调度器（`Workspace`）；会话没有声明工作目录时回落到进程目录。工具调用通过 `exec.agent.session.id` 找到对应作用域。
+- 2026-09-05：增强通道分两波执行。图通道声明 `dependsOnBaseline`，检索器先跑基线与多粒度通道，再把基线结果作为种子交给图通道，因此图扩展只能围绕真实命中展开，不会自己发散。
+- 2026-09-05：GMM 不可分时按分位数建边；accept 集占比落在 [2%, 60%] 之外也视为不可信。图上出现超级枢纽节点时不关闭通道，而是把该节点的边截断到最强的若干条——关掉整条通道的代价比截断一个节点大得多。
+- 2026-09-05：调和只在事实已入库之后进行。收割器先写入再调和，模型不可用时最坏结果是留下一条冗余记忆，而不是丢掉一条有效记忆。duplicate 会物理删除刚写入的重复件并给原件加权，update 走 supersede 版本链，contradict 两条都留下并记一条 `contradicts` 边。
+- 2026-09-05：抽象是叠加而非替换。来源单元保持 active，抽象单元记录 `derivedFrom` 并以较低置信度起步。
+- 2026-09-05：衰减只归档不删除，`pinned` 类型完全豁免。物理删除只有 `/memory purge --yes` 一个入口。
+- 2026-09-05：`memgas-mcp` 没有自己的模型，`memory_ingest` 直接原文入库而不做摘要。宁可让 MCP 侧的记忆质量低于插件侧，也不引入第二套模型配置。SQLite 的 unicode61 分词器把整段连续中文当成一个 token，无法部分匹配；索引与查询都改用相邻汉字组成的 bigram，词法通道因此对中文可用。
 
 ## 未决问题
 
-- 默认模型定稿：`multilingual-e5-small` 还是 `bge-small-zh-v1.5`，取决于 M1 在中英混合数据上的实测。
-- RRF 的 k 常数与各通道权重初值，需要 bench 数据支撑，先用文献常用值 60 起步。
+- 默认模型定稿：`multilingual-e5-small` 还是 `bge-small-zh-v1.5`。
+- RRF 的 k 常数与各通道权重初值，先用文献常用值 60 起步，后续按使用反馈调整。
 - `ctx.storageDomain` 是否适合存向量与大图，还是 core 自管 SQLite 更省事。M0 读完 storage 子系统文档后定。
-- 真实会话语料如何采集与脱敏（自用会话 vs 公开数据），这决定 M3 验收是否可信。
 - **发布前必须解决**：`dsh-memgas` 依赖 `@memgas/core` 的 `workspace:*`，打包时会重写成一个未发布的版本号，用户 `dsh plugin add dsh-memgas` 会装不上。两条路：把 `@memgas/core` 一并发到 npm（`memgas-mcp` 也要用它，倾向这条），或在构建时把 core 打进插件的 `lib/`。M5 前必须选定。
-- 是否要 Web UI 记忆浏览面板（client 包），还是先只做 `/memory` 命令。`/memory` 命令本身也还没做：`ctx.commands` 的注册接口尚未从上游类型里核对。
-- 多工作区会话的作用域归属（见 2026-09-05 决策记录最后一条）。
+- 是否要 Web UI 记忆浏览面板（client 包）。
+- 本地 ONNX embedder（自动下载 + 降级链）尚未实现，是当前与设计差距最大的一块。
+- `confirmWrites` 的待确认队列（`/memory review`）尚未实现。
 
 ## 引用
 

@@ -1,4 +1,14 @@
 {
   "files": [],
-  "references": [{ "path": "./packages/core" }, { "path": "./packages/dsh-plugin" }]
+  "references": [
+    {
+      "path": "./packages/core"
+    },
+    {
+      "path": "./packages/dsh-plugin"
+    },
+    {
+      "path": "./packages/mcp"
+    }
+  ]
 }

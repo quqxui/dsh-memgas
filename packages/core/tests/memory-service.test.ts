@@ -41,7 +41,7 @@ describe('MemoryService', () => {
   test('reports both baseline channels for a query that both matched', async () => {
     const memory = service()
     await memory.save({ content: '把 packages/core/src/store.ts 的超时改成 500ms', scope: 'project:p' })
-    const result = await memory.search({ query: 'store.ts 超时', scopes: ['project:p'], k: 5 })
+    const result = await memory.search({ query: 'store.ts 超时', scopes: ['project:p'], k: 5, mode: 'lite' })
     const channels = result.channels.map(report => report.channel).sort()
     expect(channels).toEqual(['dense', 'lexical'])
     expect(result.channels.every(report => report.status === 'ok')).toBe(true)

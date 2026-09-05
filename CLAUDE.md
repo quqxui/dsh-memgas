@@ -6,10 +6,12 @@ DeepSeek Harness (dsh) 的长期记忆插件：存储 + 演化 + 检索利用。
 
 **设计文档就是 `README.md`。改设计先改 README，再改代码。**
 
-当前阶段：M2 完成，M3（增强通道）与 M4（演化）未开始。`packages/core` 有存储、双基线通道、RRF 融合、检索编排、后台队列、收割器、提示词与结构化输出校验、注入决策、画像段；`packages/dsh-plugin` 有三个工具、事件映射、LLM 客户端、pre-step 注入与 bundle 清单。动手前先读 README 的「设计原则」「路线图」「决策记录」「未决问题」。
+当前阶段：路线图 M0–M5 的功能已全部实现，共 233 个测试。仍缺三块：本地 ONNX embedder（自动下载 + 降级链）、`/memory review` 待确认队列、npm 发布。动手前先读 README 的「设计原则」「路线图」「决策记录」「未决问题」。
+
+三个包：`packages/core`（存储与图、四条检索通道、融合、收割器、提示词、演化六过程、诊断）、`packages/dsh-plugin`（三个工具、`/memory` 命令、事件映射、pre-step 注入、按会话分作用域）、`packages/mcp`（stdio JSON-RPC server）。
 
 ```sh
-pnpm test        # 全量测试，当前 137 个
+pnpm test        # 全量测试，当前 233 个
 pnpm run build   # tsc -b，兼做类型检查
 ```
 
@@ -20,19 +22,26 @@ pnpm run build   # tsc -b，兼做类型检查
 - 插件**不在构建期依赖 dsh 的包**（`@deepseek-ai/dsh-tools` 依赖未发布的私有包）。所需接口以结构化类型写在 `packages/dsh-plugin/src/index.ts`，对照 npm 上 `@deepseek-ai/dsh-tools` 与 `@deepseek-ai/dsh-llm` 的 `.d.ts` 校准。
 - 中文词法检索走 CJK 双字组，见 `packages/core/src/text.ts`。
 - 核心库对模型只依赖 `LlmClient`（文本进文本出，可带 sessionId），对宿主事件只依赖 `HarvestEvent`；dsh 侧的映射在 `packages/dsh-plugin/src/session-events.ts` 与 `llm-client.ts`。测试用假 ctx 走整条链路，不 mock 内部。
-- 插件的 `apply` 返回 `{ idle() }` 供测试等待后台队列排空；Cordis 忽略返回值。
+- 插件的 `apply` 返回一个 handle（`idle()` / `defaultScope` / `scopeForSession()` / `memory` / `evolutionStats()`）供测试使用；Cordis 忽略返回值。
+- 每个作用域一个 `Workspace`（store + harvester + evolution + queue），按会话的 `cwd` 解析，见 `packages/dsh-plugin/src/index.ts`。
+- 词法 embedder 在小库上几乎召回全部条目（哈希碰撞产生伪相似度）。要构造"基线够不到"的检索场景，测试里注入一个正交的 embedder，见 `packages/core/tests/service-modes.test.ts` 的 `TopicEmbedder`。
+
+## 对外文案约束（作者要求，优先级最高）
+
+README、包 README、代码注释、提交信息、npm 包描述都是给外人看的。**作者的内部判断一律不写进去**，包括但不限于：论文方法可能过拟合某个数据集、论文提示词偏简单、公开的记忆 benchmark 不适合本场景、"不以复现论文为目标"之类的表态。对外只讲工程事实：机制是什么、怎么降级、怎么配置。
+
+这类内部判断只允许出现在本文件里。作者曾手动删过 README 里的此类措辞，不要再写回去。
 
 ## 第一原则：论文是参考，不是规格
 
-论文的方法在四个长期记忆 benchmark 上验证过，但那些 benchmark 是多轮闲聊式对话，而本插件面对的是编码 agent 的真实会话：大量文件路径、报错栈、包名、命令行、工具输出。分布不同，论文的最优解不一定是这里的最优解，也可能存在对数据集的过拟合。
+（内部原则，不对外表述。）论文在多轮对话 benchmark 上验证，本插件面对的是编码 agent 会话：文件路径、报错栈、包名、命令行、工具输出。分布不同，论文的最优解不一定是这里的最优解。作者明确表示：暂不做真实语料验证，公开记忆 benchmark 不适合本场景，默认配置按工程判断定。
 
-因此，任何来自论文的机制（GMM 关联、熵路由、PPR、LLM 过滤）在本仓库都必须满足以下三条，否则默认关闭：
+因此，任何来自论文的机制（GMM 关联、熵路由、PPR、LLM 过滤）在本仓库都必须满足以下两条：
 
 1. **可降级**：它失效时系统退回一条不依赖它的普通路径，而不是崩溃或返回空结果。
 2. **单调不劣化**：它只能补充或重排候选，不能把基线检索已经找到的结果挤出最终结果集。
-3. **有证据**：在 `bench/` 上跑出它相对基线的增益数据，写进 README。跑不赢基线的机制，代码保留、默认关闭、README 如实说明。
 
-不要为了贴合论文叙事而牺牲真实效果。README 里可以讲论文故事，代码里必须按工程标准判断。
+每条增强机制要有开关、权重、超时和健康检查；测试里用构造用例证明它在目标形态（多跳、粒度选择）上确实补充了基线，且从不挤出基线。不要为了贴合论文叙事而牺牲真实效果。
 
 ## 工程约束
 
