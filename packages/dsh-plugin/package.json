@@ -1,6 +1,6 @@
 {
   "name": "dsh-memgas",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Long-term memory for DeepSeek Harness: store, evolve, recall.",
   "type": "module",
   "main": "lib/index.js",
@@ -30,7 +30,7 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@memgas/core": "workspace:*"
+    "@memgas/core": "workspace:^"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.2"

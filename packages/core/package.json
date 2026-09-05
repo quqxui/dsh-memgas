@@ -1,7 +1,6 @@
 {
   "name": "@memgas/core",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -16,5 +15,17 @@
   ],
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
+  },
+  "description": "Multi-granularity long-term memory engine: storage, retrieval channels, evolution.",
+  "license": "MIT",
+  "keywords": [
+    "memory",
+    "retrieval",
+    "rrf",
+    "agent",
+    "long-term-memory"
+  ],
+  "publishConfig": {
+    "access": "public"
   }
 }

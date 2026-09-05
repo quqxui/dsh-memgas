@@ -23,7 +23,7 @@ importers:
   packages/dsh-plugin:
     dependencies:
       '@memgas/core':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../core
     devDependencies:
       '@deepseek-ai/cordis':
@@ -33,7 +33,7 @@ importers:
   packages/mcp:
     dependencies:
       '@memgas/core':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../core
 
 packages:

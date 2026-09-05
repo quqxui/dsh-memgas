@@ -4,6 +4,3 @@ packages:
 # esbuild ships a prebuilt binary via postinstall; vitest needs it.
 allowBuilds:
   esbuild: true
-  onnxruntime-node: set this to true or false
-  protobufjs: set this to true or false
-  sharp: set this to true or false

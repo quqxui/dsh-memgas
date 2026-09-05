@@ -1,12 +1,12 @@
 # dsh-memgas
 
-> **状态：路线图 M0–M5 的功能已全部实现（2026-09-05）**，253 个测试覆盖，并在真实 dsh 中验证过加载。尚未发布到 npm，`memgas-mcp` 与其他 agent 的互通尚未实测。英文版 README 在首个发布版本前补齐。
+> **状态：0.1.0，功能完整、待发布（2026-09-05）**。263 个测试覆盖，并在真实 dsh 0.1.2-rc.1 上做过端到端验证：模型自主写入记忆、自动收割蒸馏、跨会话主动召回、强化与关联建边、跨进程补做抽取都已跑通。三个包的 tarball 已验证可安装并加载。`memgas-mcp` 与第三方 agent 的互通尚未实测；英文 README 待补。
 
 ## 开发
 
 ```sh
 pnpm install
-pnpm test        # vitest，253 个测试
+pnpm test        # vitest，263 个测试
 pnpm run build   # tsc -b，同时做类型检查
 ```
 
@@ -353,7 +353,7 @@ dsh-memgas/
 3. **M2 自动收割与提示词**（已完成）：`session/event` 收割、compaction 收割、提示词与 schema 校验、后台队列、主动注入、常驻段、使用回执。
 4. **M3 增强通道**（已完成）：多粒度 + 熵路由（C3）、GMM 关联图 + PPR（C4）、健康检查与降级阶梯、可选 LLM 过滤、`lite` / `hybrid` / `memgas` 三种模式。
 5. **M4 演化**（已完成）：调和、强化、衰减、抽象、重关联，全部由 `EvolutionRunner` 按事件调度；`/memory` 提供 status / search / diag / list / forget / restore / pin / review / export / purge，含 `confirmWrites` 的待确认队列。
-6. **M5 memgas-mcp 与发布**（MCP server 已完成，发布未做）：`memgas-mcp` 提供 stdio JSON-RPC 与五个工具，与插件共用同一套存储布局。跨 agent 共享记忆库**尚未实测**；npm 发布、英文 README、Web UI 设置卡片都还没做。
+6. **M5 memgas-mcp 与发布**：`memgas-mcp` 提供 stdio JSON-RPC 与五个工具，与插件共用同一套存储布局。三个包已就绪待发布（`@memgas/core` 一并发布，插件按 `^0.1.0` 依赖它）。跨 agent 共享记忆库**尚未实测**；英文 README、Web UI 设置卡片还没做。
 
 ## 决策记录
 
@@ -385,14 +385,18 @@ dsh-memgas/
 - 2026-09-05：`memgas-mcp` 没有自己的模型，`memory_ingest` 直接原文入库而不做摘要。宁可让 MCP 侧的记忆质量低于插件侧，也不引入第二套模型配置。
 - 2026-09-05：`@huggingface/transformers` 不作为依赖声明，连 optional peer 也不是。pnpm 默认会安装可选 peer 依赖，那会把 `onnxruntime-node` 与 `sharp` 拖进每一次 `dsh plugin add`，撞上构建脚本授权门槛——正是选择 `node:sqlite` 时要绕开的那道坎。需要本地模型的用户自行安装，装之前一直用词法向量。
 - 2026-09-05：本地模型异步加载，加载完成后后台分批补算向量。写入不能等模型下载，所以期间的记忆先带词法 embedder 的 id，就绪后再重算。
-- 2026-09-05：`confirmWrites` 打开时，收割出的摘要、事实与关键词都以 `pending` 状态入库，原始轮次照常可检索。这样即使用户从不处理队列，会话内容也不会丢。SQLite 的 unicode61 分词器把整段连续中文当成一个 token，无法部分匹配；索引与查询都改用相邻汉字组成的 bigram，词法通道因此对中文可用。
+- 2026-09-05：`confirmWrites` 打开时，收割出的摘要、事实与关键词都以 `pending` 状态入库，原始轮次照常可检索。这样即使用户从不处理队列，会话内容也不会丢。
+- 2026-09-05：原始轮次同步落库，只有蒸馏进后台队列。串行队列被前一个任务占住时，一次性宿主退出会连整轮对话一起丢掉；现在最坏情况只是蒸馏推迟。
+- 2026-09-05：蒸馏可续做。未完成抽取的轮次标记 `unextracted`，下次会话开始时由 `catchUp()` 补做。一次性宿主在关闭阶段发起 LLM 调用不可靠：给的预算小，带推理的路由会把预算耗在推理上返回空文本；预算大，进程又会在调用返回前退出。
+- 2026-09-05：模型路由持久化在 store 的 meta 里。补做发生在会话开始，那时本会话还没发出过模型请求，没有路由可用。
+- 2026-09-05：抽取的 token 预算给到 4000。它复用会话自己的路由，而该路由可能带较高的推理档位，预算太小会只剩推理没有输出。
+- 2026-09-05：主动注入跳过原始轮次，只注入蒸馏后的记忆；原文仍可由 `memory_search` 取到。整段转录会吃掉注入预算，而它承载的信息摘要里已经有了。SQLite 的 unicode61 分词器把整段连续中文当成一个 token，无法部分匹配；索引与查询都改用相邻汉字组成的 bigram，词法通道因此对中文可用。
 
 ## 未决问题
 
 - 默认模型定稿：`multilingual-e5-small` 还是 `bge-small-zh-v1.5`。
 - RRF 的 k 常数与各通道权重初值，先用文献常用值 60 起步，后续按使用反馈调整。
 - `ctx.storageDomain` 是否适合存向量与大图，还是 core 自管 SQLite 更省事。M0 读完 storage 子系统文档后定。
-- **发布前必须解决**：`dsh-memgas` 依赖 `@memgas/core` 的 `workspace:*`，打包时会重写成一个未发布的版本号，用户 `dsh plugin add dsh-memgas` 会装不上。两条路：把 `@memgas/core` 一并发到 npm（`memgas-mcp` 也要用它，倾向这条），或在构建时把 core 打进插件的 `lib/`。M5 前必须选定。
 - 是否要 Web UI 记忆浏览面板（client 包）。
 - 本地 ONNX embedder（自动下载 + 降级链）尚未实现，是当前与设计差距最大的一块。
 - `confirmWrites` 的待确认队列（`/memory review`）尚未实现。
