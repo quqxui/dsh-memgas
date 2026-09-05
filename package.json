@@ -17,7 +17,7 @@
     "typescript": "^5.9.0",
     "vitest": "^3.2.0"
   },
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Long-term memory for DeepSeek Harness: multi-channel retrieval and an evolving memory store.",
   "main": "dist/index.js",
   "exports": {
