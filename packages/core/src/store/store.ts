@@ -36,7 +36,7 @@ export interface UnitQuery {
   kinds?: string[]
 }
 
-export type UnitPatch = Partial<Pick<MemoryUnit, 'status' | 'supersededBy' | 'importance' | 'version' | 'updatedAt' | 'content' | 'confidence' | 'embedderId'>>
+export type UnitPatch = Partial<Pick<MemoryUnit, 'status' | 'supersededBy' | 'importance' | 'version' | 'updatedAt' | 'content' | 'confidence' | 'embedderId' | 'kind'>>
 
 export interface ListOptions {
   scopes: string[]
@@ -310,6 +310,7 @@ class SqliteMemoryStore implements MemoryStore {
       content: 'content',
       confidence: 'confidence',
       embedderId: 'embedder_id',
+      kind: 'kind',
     }
     const sets: string[] = []
     const params: unknown[] = []

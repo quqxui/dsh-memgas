@@ -109,6 +109,71 @@ describe('Harvester', () => {
     expect(turn.content).not.toContain('sk-abcd1234abcd1234abcd1234')
   })
 
+  test('stores the transcript even while the queue is busy with older work', () => {
+    const queue = new BackgroundQueue({ jobTimeoutMs: 5000 })
+    // Something slow is already running, exactly as catch-up would be.
+    queue.enqueue('busy', () => new Promise<void>(() => {}))
+    const harvester = harvesterWith(store, new FakeLlm(extraction), { queue })
+
+    harvester.observe('s1', { type: 'user', turn: 1, text: longUser })
+    harvester.observe('s1', { type: 'turn-end', turn: 1, completed: true })
+
+    // No await: this is the state a process that exited right here would leave.
+    const turns = store.listUnits({ scopes: ['project:p'], granularities: ['turn'], limit: 5 })
+    expect(turns).toHaveLength(1)
+    expect(turns[0]!.kind).toBe('unextracted')
+    expect(store.searchLexical('store.ts 超时', { limit: 5 }).length).toBeGreaterThan(0)
+  })
+
+  test('marks a raw turn as unextracted until its facts are written', async () => {
+    const harvester = harvesterWith(store, new FakeLlm('模型这次没给出 JSON'))
+    harvester.observe('s1', { type: 'user', turn: 1, text: longUser })
+    harvester.observe('s1', { type: 'turn-end', turn: 1, completed: true })
+    await harvester.idle()
+    expect(store.listUnits({ scopes: ['project:p'], granularities: ['turn'], kinds: ['unextracted'], limit: 5 })).toHaveLength(1)
+  })
+
+  test('clears the marker once extraction succeeds', async () => {
+    const harvester = harvesterWith(store, new FakeLlm(extraction))
+    harvester.observe('s1', { type: 'user', turn: 1, text: longUser })
+    harvester.observe('s1', { type: 'turn-end', turn: 1, completed: true })
+    await harvester.idle()
+    expect(store.listUnits({ scopes: ['project:p'], granularities: ['turn'], kinds: ['unextracted'], limit: 5 })).toHaveLength(0)
+  })
+
+  test('catchUp distills turns whose extraction never completed', async () => {
+    // The host exited before the model answered; only the transcript survived.
+    const first = harvesterWith(store, new FakeLlm(() => { throw new Error('host exited') }))
+    first.observe('s1', { type: 'user', turn: 1, text: longUser })
+    first.observe('s1', { type: 'turn-end', turn: 1, completed: true })
+    await first.idle()
+    expect(store.listActive({ scopes: ['project:p'], limit: 10 }).map(u => u.granularity)).toEqual(['turn'])
+
+    const later = harvesterWith(store, new FakeLlm(extraction))
+    const outcome = await later.catchUp()
+    expect(outcome.processed).toBe(1)
+    expect(store.searchLexical('检索超时定为', { limit: 5 }).length).toBeGreaterThan(0)
+    expect(store.listUnits({ scopes: ['project:p'], granularities: ['turn'], kinds: ['unextracted'], limit: 5 })).toHaveLength(0)
+  })
+
+  test('catchUp does nothing when every turn was already distilled', async () => {
+    const harvester = harvesterWith(store, new FakeLlm(extraction))
+    harvester.observe('s1', { type: 'user', turn: 1, text: longUser })
+    harvester.observe('s1', { type: 'turn-end', turn: 1, completed: true })
+    await harvester.idle()
+    expect((await harvester.catchUp()).processed).toBe(0)
+  })
+
+  test('catchUp leaves the marker in place when the model is still unavailable', async () => {
+    const first = harvesterWith(store, new FakeLlm(() => { throw new Error('host exited') }))
+    first.observe('s1', { type: 'user', turn: 1, text: longUser })
+    first.observe('s1', { type: 'turn-end', turn: 1, completed: true })
+    await first.idle()
+    const later = harvesterWith(store, new FakeLlm(() => { throw new Error('still down') }))
+    await later.catchUp()
+    expect(store.listUnits({ scopes: ['project:p'], granularities: ['turn'], kinds: ['unextracted'], limit: 5 })).toHaveLength(1)
+  })
+
   test('does not harvest the same turn twice, even across a restart', async () => {
     const llm = new FakeLlm(extraction)
     const first = harvesterWith(store, llm)

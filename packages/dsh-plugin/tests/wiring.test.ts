@@ -42,6 +42,14 @@ describe('SessionEventMapper', () => {
     expect(mapped).toEqual({ type: 'compaction-summary', text: '会话摘要', seqStart: 2, seqEnd: 30 })
   })
 
+  test('falls back to the most recent route for a session that has none yet', () => {
+    const mapper = new SessionEventMapper()
+    expect(mapper.latestRoute()).toBeNull()
+    mapper.map('s1', { type: 'request/header', data: { header: { config: { provider: 'p', model: 'm' } }, reason: 'initial' } })
+    expect(mapper.latestRoute()).toEqual({ provider: 'p', model: 'm' })
+    expect(mapper.routeFor('brand-new-session')).toBeNull()
+  })
+
   test('remembers the model route each session last used', () => {
     const mapper = new SessionEventMapper()
     expect(mapper.routeFor('s1')).toBeNull()

@@ -18,6 +18,11 @@ export type HarvestEvent =
   | { type: 'turn-end'; turn: number; completed: boolean }
   | { type: 'compaction-summary'; text: string; seqStart: number; seqEnd: number }
 
+export interface CatchUpOutcome {
+  processed: number
+  remaining: number
+}
+
 export interface HarvestStats {
   harvestedTurns: number
   skippedShort: number
@@ -51,7 +56,15 @@ interface SessionState {
 }
 
 const DEFAULTS = { minTurnChars: 80, maxTranscriptChars: 6000, sessionSummaryEvery: 8, confirmWrites: false }
-const EXTRACTION_MAX_TOKENS = 1200
+/** Generous, because the session's own route may spend part of it on reasoning. */
+const EXTRACTION_MAX_TOKENS = 4000
+/**
+ * Marks a stored turn whose distillation has not landed yet. A one-shot host
+ * can exit before the extractor answers; the transcript is already safe, and
+ * `catchUp()` finishes the job in a later session.
+ */
+const UNEXTRACTED = 'unextracted'
+const CATCH_UP_LIMIT = 20
 
 function newId(): string {
   return `m_${randomBytes(5).toString('hex')}`
@@ -131,9 +144,22 @@ export class Harvester {
     if (this.alreadyHarvested(sessionId, event.turn)) return
 
     const turn = event.turn
+    // Store the transcript here, not in the job: the queue may be busy with an
+    // older task, and a host that exits meanwhile would otherwise lose the
+    // conversation outright. Distillation is what waits.
+    const turnUnit = this.unit({
+      granularity: 'turn',
+      content: redactSecrets(transcript).text.slice(0, this.opts.maxTranscriptChars),
+      provenance: this.provenance(sessionId, { turn }),
+      importance: 0.3,
+      kind: UNEXTRACTED,
+    })
+    this.opts.store.put(turnUnit)
+    this.stats_.harvestedTurns += 1
+    this.markHarvested(sessionId, turn)
+
     this.opts.queue.enqueue(`harvest:${sessionId}:${turn}`, async signal => {
-      const summary = await this.harvestTurn(sessionId, turn, transcript, signal)
-      this.markHarvested(sessionId, turn)
+      const summary = await this.harvestTurn(turnUnit, sessionId, signal)
       state.completedTurns += 1
       if (summary) state.turnSummaries.push(summary)
       if (state.completedTurns % this.opts.sessionSummaryEvery === 0 && state.turnSummaries.length > 0) {
@@ -239,12 +265,29 @@ export class Harvester {
     this.stats_.lastFailure = reason
   }
 
-  /** Returns the turn summary so the session summarizer can build on it. */
-  private async harvestTurn(sessionId: string, turn: number, rawTranscript: string, signal: AbortSignal): Promise<string | null> {
-    const transcript = redactSecrets(rawTranscript).text.slice(0, this.opts.maxTranscriptChars)
-    const provenance = this.provenance(sessionId, { turn })
-    await this.persist([this.unit({ granularity: 'turn', content: transcript, provenance, importance: 0.3 })])
-    this.stats_.harvestedTurns += 1
+  /** Adds the vector the synchronous store skipped, then distills the turn. */
+  private async harvestTurn(turnUnit: MemoryUnit, sessionId: string, signal: AbortSignal): Promise<string | null> {
+    await this.addVector(turnUnit)
+    return this.distill(turnUnit.id, turnUnit.content, turnUnit.provenance, sessionId, signal)
+  }
+
+  private async addVector(unit: MemoryUnit): Promise<void> {
+    const [vector] = await this.opts.embedder.embed([unit.content])
+    if (vector) this.opts.store.putVector(unit.id, this.opts.embedder.id, vector)
+  }
+
+  /**
+   * Turn one stored transcript into summaries, facts and keywords. Separate
+   * from harvesting so it can be re-run later for turns that were stored but
+   * never distilled.
+   */
+  private async distill(
+    turnId: string,
+    transcript: string,
+    provenance: Provenance,
+    sessionId: string,
+    signal: AbortSignal,
+  ): Promise<string | null> {
 
     const built = buildTurnPrompt({
       transcript,
@@ -290,7 +333,41 @@ export class Harvester {
       }))
     }
     await this.persist(units)
+    // The transcript has been distilled; it no longer needs revisiting.
+    this.opts.store.patch(turnId, { kind: null })
     return extraction.summary || null
+  }
+
+  /**
+   * Distill transcripts left behind by a host that exited mid-extraction.
+   * Safe to call at any time; turns already distilled are skipped.
+   */
+  async catchUp(opts: { limit?: number; signal?: AbortSignal } = {}): Promise<CatchUpOutcome> {
+    const pending = this.opts.store.listUnits({
+      scopes: [this.opts.scope],
+      granularities: ['turn'],
+      kinds: [UNEXTRACTED],
+      limit: opts.limit ?? CATCH_UP_LIMIT,
+    })
+    let processed = 0
+    for (const unit of pending) {
+      await this.addVector(unit)
+      const summary = await this.distill(
+        unit.id,
+        unit.content,
+        unit.provenance,
+        unit.provenance.sessionId ?? 'unknown',
+        opts.signal ?? new AbortController().signal,
+      )
+      if (summary !== null || this.opts.store.get(unit.id)?.kind !== UNEXTRACTED) processed += 1
+    }
+    const remaining = this.opts.store.listUnits({
+      scopes: [this.opts.scope],
+      granularities: ['turn'],
+      kinds: [UNEXTRACTED],
+      limit: CATCH_UP_LIMIT,
+    }).length
+    return { processed, remaining }
   }
 
   private async summarizeSession(sessionId: string, turn: number, turnSummaries: string[], signal: AbortSignal): Promise<void> {

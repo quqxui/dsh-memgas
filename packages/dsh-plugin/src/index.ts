@@ -64,6 +64,8 @@ interface PreStepPayload {
   step: number
 }
 interface ContextLike {
+  /** Registers a teardown hook; Cordis awaits async disposers. */
+  effect(execute: () => () => Promise<void>): unknown
   tools: ToolRegistryLike
   systemPrompt: SystemPromptLike
   commands: CommandRegistryLike
@@ -137,6 +139,8 @@ const DEFAULTS = {
   recallBudgetMs: 150,
   backgroundJobTimeoutMs: 60_000,
   profileSectionOrder: 300,
+  /** Upper bound on how long shutdown waits for background work. */
+  drainTimeoutMs: 15_000,
 }
 
 const TEXT_OUTPUT = {
@@ -166,8 +170,40 @@ export function apply(ctx: ContextLike, config: Config = {}): PluginHandle {
   const settings = { ...DEFAULTS, ...config }
   const defaultCwd = config.cwd ?? process.cwd()
   const defaultScope = resolveScope(defaultCwd)
-  const mapper = new SessionEventMapper()
-  const llm = new DshLlmClient({ llm: ctx.llm, route: sessionId => (sessionId ? mapper.routeFor(sessionId) : null) })
+  const ROUTE_META_KEY = 'route:last'
+  const mapper = new SessionEventMapper(route => {
+    // Persisted so a fresh process can distil leftovers before its own first
+    // model request tells it which route to use.
+    for (const workspace of workspaces.values()) {
+      try {
+        workspace.memory.store.setMeta(ROUTE_META_KEY, JSON.stringify(route))
+      } catch {
+        // A store that cannot record the route still works for everything else.
+      }
+    }
+  })
+
+  function storedRoute(): { provider: string; model: string } | null {
+    for (const workspace of workspaces.values()) {
+      try {
+        const raw = workspace.memory.store.getMeta(ROUTE_META_KEY)
+        if (!raw) continue
+        const parsed = JSON.parse(raw) as { provider?: unknown; model?: unknown }
+        if (typeof parsed.provider === 'string' && typeof parsed.model === 'string') {
+          return { provider: parsed.provider, model: parsed.model }
+        }
+      } catch {
+        // Ignore an unreadable record and try the next store.
+      }
+    }
+    return null
+  }
+
+  const llm = new DshLlmClient({
+    llm: ctx.llm,
+    route: sessionId =>
+      (sessionId ? mapper.routeFor(sessionId) : null) ?? mapper.latestRoute() ?? storedRoute(),
+  })
 
   const workspaces = new Map<string, Workspace>()
   const sessionScopes = new Map<string, string>()
@@ -370,7 +406,13 @@ export function apply(ctx: ContextLike, config: Config = {}): PluginHandle {
   ctx.on('agent/session-start', payload => {
     try {
       const scope = noteSession(payload.agent?.session)
-      workspaceFor(scope).evolution.onSessionStart()
+      const workspace = workspaceFor(scope)
+      workspace.evolution.onSessionStart()
+      // A one-shot host can exit before an extraction lands. Finish those now,
+      // while there is a live process and a working model route.
+      workspace.queue.enqueue('catch-up', async signal => {
+        await workspace.harvester.catchUp({ signal })
+      })
     } catch {
       // Maintenance is best-effort; a session must start regardless.
     }
@@ -426,9 +468,22 @@ export function apply(ctx: ContextLike, config: Config = {}): PluginHandle {
     }
   })
 
+  const drain = () => Promise.all([...workspaces.values()].map(workspace => workspace.queue.idle()))
+
+  // One-shot hosts exit as soon as the turn finishes. Without this the
+  // harvest and evolution jobs queued during that turn are dropped and the
+  // session leaves no memory behind. The deadline keeps a stuck job from
+  // holding the process open.
+  ctx.effect(() => async () => {
+    await Promise.race([
+      drain().then(() => undefined),
+      new Promise<void>(resolve => setTimeout(resolve, settings.drainTimeoutMs).unref?.()),
+    ])
+  })
+
   return {
     idle: async () => {
-      await Promise.all([...workspaces.values()].map(workspace => workspace.queue.idle()))
+      await drain()
     },
     defaultScope,
     scopeForSession: (sessionId: string) => scopeForSession(sessionId),

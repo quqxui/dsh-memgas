@@ -13,6 +13,9 @@ const unit = (id: string, content = `memory ${id}`): MemoryUnit => ({
 const item = (id: string, contributions: RetrievedMemory['contributions'], content?: string): RetrievedMemory =>
   ({ unit: unit(id, content), score: 0.02, contributions })
 
+const rawTurn = (id: string, contributions: RetrievedMemory['contributions']): RetrievedMemory =>
+  ({ unit: { ...unit(id, 'user: 一整轮对话原文\nassistant: 回复'), granularity: 'turn' }, score: 0.02, contributions })
+
 const result = (items: RetrievedMemory[]): RetrievalResult => ({ items, channels: [], degraded: false })
 
 const defaults = { denseThreshold: 0.6, budgetTokens: 600, exclude: new Set<string>() }
@@ -47,6 +50,12 @@ describe('planInjection', () => {
     const many = result([strong('a'), strong('b'), strong('c')])
     const plan = planInjection(many, { ...defaults, budgetTokens: 300 })
     expect(plan?.ids.length).toBe(1)
+  })
+
+  test('does not inject raw turns, only distilled memories', () => {
+    const strong = [{ channel: 'dense', rank: 1, score: 0.9 }]
+    expect(planInjection(result([rawTurn('t', strong)]), defaults)).toBeNull()
+    expect(planInjection(result([rawTurn('t', strong), item('s', strong)]), defaults)?.ids).toEqual(['s'])
   })
 
   test('wraps the cards in a header that tells the model what they are', () => {

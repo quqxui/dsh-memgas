@@ -37,9 +37,17 @@ function textOf(blocks: unknown): string {
 export class SessionEventMapper {
   private readonly turns = new Map<string, number>()
   private readonly routes = new Map<string, ModelRoute>()
+  private last: ModelRoute | null = null
+  /** Called whenever a new route is seen, so it can outlive the process. */
+  constructor(private readonly onRoute?: (route: ModelRoute) => void) {}
 
   routeFor(sessionId: string): ModelRoute | null {
     return this.routes.get(sessionId) ?? null
+  }
+
+  /** The most recent route from any session; used before a session has one. */
+  latestRoute(): ModelRoute | null {
+    return this.last
   }
 
   map(sessionId: string, event: SessionEventLike): HarvestEvent | null {
@@ -81,7 +89,12 @@ export class SessionEventMapper {
         const header = data['header']
         const config = isRecord(header) ? header['config'] : null
         if (isRecord(config) && typeof config['provider'] === 'string' && typeof config['model'] === 'string') {
-          this.routes.set(sessionId, { provider: config['provider'], model: config['model'] })
+          const route = { provider: config['provider'], model: config['model'] }
+          this.routes.set(sessionId, route)
+          if (this.last?.provider !== route.provider || this.last?.model !== route.model) {
+            this.last = route
+            this.onRoute?.(route)
+          }
         }
         return null
       }

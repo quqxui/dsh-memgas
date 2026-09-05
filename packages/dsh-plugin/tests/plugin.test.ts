@@ -31,6 +31,7 @@ function fakeContext() {
   const commands: RegisteredCommand[] = []
   const sections: { name: string; order: number; text: string | (() => string) }[] = []
   const listeners = new Map<string, ((...args: unknown[]) => unknown)[]>()
+  const disposers: (() => Promise<void>)[] = []
   return {
     tools: { register: (definition: RegisteredTool) => { tools.push(definition); return () => {} } },
     commands: { register: (definition: RegisteredCommand) => { commands.push(definition); return () => {} } },
@@ -40,9 +41,12 @@ function fakeContext() {
       listeners.set(event, [...(listeners.get(event) ?? []), listener])
       return () => {}
     },
+    effect: (execute: () => unknown) => { disposers.push(execute() as () => Promise<void>); return () => {} },
     registered: tools,
     registeredCommands: commands,
     sections,
+    disposers,
+    dispose: () => Promise.all(disposers.map(d => d())),
     fire: (event: string, ...args: unknown[]) => Promise.all((listeners.get(event) ?? []).map(listener => listener(...args))),
   }
 }
@@ -194,6 +198,37 @@ describe('the /memory command', () => {
     const viaCommand = await command.handler({ rawInput: 'status', agent: {} })
     const viaTool = String(await ctx.registered.find(t => t.name === 'memory_status')!.execute({}, {}))
     expect(viaCommand.text).toBe(viaTool)
+  })
+})
+
+describe('shutdown', () => {
+  test('drains pending background work before the harness tears the plugin down', async () => {
+    const ctx = fakeContext()
+    apply(ctx as never, { dataDir: ':memory:', minTurnChars: 10 })
+    // Without a registered disposer the harvest is cut off when the process exits.
+    expect(ctx.disposers.length).toBeGreaterThan(0)
+    await runTurn(ctx, 's1', 1, '把 packages/core/src/store.ts 的检索超时改成 500ms', '改好了')
+    await ctx.dispose()
+    const search = ctx.registered.find(tool => tool.name === 'memory_search')!
+    expect(String(await search.execute({ query: 'store.ts 超时' }, {}))).toContain('500ms')
+  })
+})
+
+describe('catch-up on session start', () => {
+  test('distills transcripts a previous run left unfinished', async () => {
+    const ctx = fakeContext()
+    const handle = apply(ctx as never, { dataDir: ':memory:', minTurnChars: 10 })
+    // Simulate a prior run that stored the transcript, recorded the route it
+    // was using, but exited before the extraction landed.
+    await handle.memory.save({ content: 'user: 把超时改成 500ms\nassistant: 好', scope: handle.defaultScope, granularity: 'turn', kind: 'unextracted' })
+    handle.memory.store.setMeta('route:last', JSON.stringify({ provider: 'p', model: 'm' }))
+
+    await ctx.fire('agent/session-start', { agent: { session: { id: 's1' } }, source: 'startup' })
+    await handle.idle()
+
+    expect(handle.memory.store.listUnits({
+      scopes: [handle.defaultScope], granularities: ['turn'], kinds: ['unextracted'], limit: 5,
+    })).toHaveLength(0)
   })
 })
 

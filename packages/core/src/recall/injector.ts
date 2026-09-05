@@ -22,6 +22,9 @@ const HEADER = '以下是长期记忆里与当前请求相关的内容，来自�
  * thresholded because they only encode rank.
  */
 function qualifies(item: RetrievedMemory, denseThreshold: number): boolean {
+  // Raw turns are the evidence behind a memory, not the memory: injecting a
+  // whole transcript spends the budget on text the summary already carries.
+  if (item.unit.granularity === 'turn') return false
   if (item.contributions.length >= 2) return true
   return item.contributions.some(c => c.channel === 'dense' && c.score >= denseThreshold)
 }
