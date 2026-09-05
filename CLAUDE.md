@@ -24,6 +24,7 @@ pnpm run build   # tsc -b，兼做类型检查
 - 插件**不在构建期依赖 dsh 的包**（`@deepseek-ai/dsh-tools` 依赖未发布的私有包）。所需接口以结构化类型写在 `packages/dsh-plugin/src/index.ts`，对照 npm 上 `@deepseek-ai/dsh-tools` 与 `@deepseek-ai/dsh-llm` 的 `.d.ts` 校准。
 - 中文词法检索走 CJK 双字组，见 `packages/core/src/text.ts`。
 - 核心库对模型只依赖 `LlmClient`（文本进文本出，可带 sessionId），对宿主事件只依赖 `HarvestEvent`；dsh 侧的映射在 `packages/dsh-plugin/src/session-events.ts` 与 `llm-client.ts`。测试用假 ctx 走整条链路，不 mock 内部。
+- **`dist/index.js` 是提交进仓库的打包产物**，让 `dsh plugin add github:...` 开箱即用。改了插件或 core 的代码必须 `pnpm run build` 并把 `dist/` 一起提交，否则 GitHub 安装的人拿到旧版本。仓库根的 package.json 就是发布用的插件包（`dsh-memgas`），`packages/dsh-plugin` 是私有源码包。
 - 插件的 `apply` 返回一个 handle（`idle()` / `defaultScope` / `scopeForSession()` / `memory` / `evolutionStats()`）供测试使用；Cordis 忽略返回值。
 - 每个作用域一个 `Workspace`（store + harvester + evolution + queue），按会话的 `cwd` 解析，见 `packages/dsh-plugin/src/index.ts`。
 - 词法 embedder 在小库上几乎召回全部条目（哈希碰撞产生伪相似度）。要构造「基线够不到」的检索场景，测试里注入一个正交的 embedder，见 `packages/core/tests/service-modes.test.ts` 的 `TopicEmbedder`。

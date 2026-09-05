@@ -14,8 +14,11 @@
 ## 安装
 
 ```sh
-dsh plugin --profile web add dsh-memgas
+dsh plugin --profile web add dsh-memgas              # 从 npm
+dsh plugin --profile web add github:quqxui/dsh-memgas # 或直接从 GitHub
 ```
+
+两种方式等价。仓库里带了打包好的单文件产物，从 GitHub 装不需要构建、不需要给 pnpm 构建授权、也不会拉任何运行时依赖——插件本身只用 Node 内置模块。
 
 重启 dsh 即生效。插件自带 bundle 配置，不需要手动改 `cordis.patch.yml`。默认零配置：不需要 API key，不下载模型，不起额外进程。
 
@@ -162,7 +165,9 @@ pnpm test        # vitest，263 个测试
 pnpm run build   # tsc -b，兼做类型检查
 ```
 
-三个包：[`dsh-memgas`](./packages/dsh-plugin)（dsh 插件）、[`memgas-core`](./packages/core)（存储、检索通道、演化，与 dsh 无关）、[`memgas-mcp`](./packages/mcp)（MCP server）。
+`pnpm run build` 会先 `tsc -b`，再用 esbuild 把插件与 core 打成 `dist/index.js`。**这个产物随仓库提交**，改了插件代码要重新构建并一起提交，否则从 GitHub 安装的人拿到的还是旧版本。
+
+源码分三个包：`packages/dsh-plugin`（dsh 接线）、[`memgas-core`](./packages/core)（存储、检索通道、演化，与 dsh 无关，单独发布在 npm）、[`memgas-mcp`](./packages/mcp)（MCP server）。
 
 设计取舍、决策记录和未决问题都在[设计文档](./docs/design.md)里。
 

@@ -14,8 +14,11 @@ Retrieval builds on the multi-granularity association and adaptive selection met
 ## Install
 
 ```sh
-dsh plugin --profile web add dsh-memgas
+dsh plugin --profile web add dsh-memgas               # from npm
+dsh plugin --profile web add github:quqxui/dsh-memgas # or straight from GitHub
 ```
+
+Both are equivalent. The repository ships a prebuilt single-file artifact, so a GitHub install needs no build step, no pnpm build authorization and pulls no runtime dependencies — the plugin uses nothing but Node built-ins.
 
 Restart dsh and it is active. The package ships its own bundle patch, so there is nothing to wire up by hand. Zero configuration by default: no API key, no model download, no extra process.
 
@@ -164,7 +167,9 @@ pnpm test        # vitest, 263 tests
 pnpm run build   # tsc -b, also the typecheck
 ```
 
-Three packages: [`dsh-memgas`](./packages/dsh-plugin) (the dsh plugin), [`memgas-core`](./packages/core) (storage, retrieval channels, evolution; no dsh dependency), [`memgas-mcp`](./packages/mcp) (MCP server).
+`pnpm run build` runs `tsc -b` and then bundles the plugin and core into `dist/index.js` with esbuild. **That artifact is committed**, so a change to the plugin has to be rebuilt and committed with it, or GitHub installs keep serving the previous build.
+
+The source is three packages: `packages/dsh-plugin` (dsh wiring), [`memgas-core`](./packages/core) (storage, retrieval channels, evolution; no dsh dependency, published separately), [`memgas-mcp`](./packages/mcp) (MCP server).
 
 Design trade-offs, decision records and open questions are in the [design document](./docs/design.md) (Chinese).
 
