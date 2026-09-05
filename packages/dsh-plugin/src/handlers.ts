@@ -44,7 +44,10 @@ export function handleStatus(memory: MemoryService, warning?: string | null, ext
     ...(warning ? [warning] : []),
     ...extra,
     `记忆条数：${status.units}`,
-    `向量模型：${status.embedder}`,
+    `向量模型：${status.embedder}` +
+      (status.embedderLoading && status.embedderLoading.state !== 'ready'
+        ? `（本地模型 ${status.embedderLoading.state}${status.embedderLoading.reason ? '：' + status.embedderLoading.reason : ''}）`
+        : ''),
     `词法索引：${status.lexicalIndex}`,
     `本次会话拦截的密钥片段：${status.redactions}`,
   ].join('\n')

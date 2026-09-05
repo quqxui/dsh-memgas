@@ -2,6 +2,9 @@ import { randomBytes } from 'node:crypto'
 import type { Granularity, MemoryUnit, Provenance } from './types.ts'
 import { openStore, type MemoryStore } from './store/store.ts'
 import { LexicalEmbedder } from './embedding/lexical.ts'
+import { AdaptiveEmbedder, type AdaptiveStatus } from './embedding/adaptive.ts'
+import { loadOnnxEmbedder } from './embedding/onnx.ts'
+import { backfillVectors } from './embedding/backfill.ts'
 import type { Embedder } from './embedding/types.ts'
 import { redactSecrets } from './secrets.ts'
 import { Retriever, type RetrievalChannel, type RetrievalResult } from './retrieval/retriever.ts'
@@ -23,6 +26,8 @@ export interface SaveInput {
 export interface MemoryStatus {
   units: number
   embedder: string
+  /** Null unless a local model is configured. */
+  embedderLoading: AdaptiveStatus | null
   lexicalIndex: 'fts5' | 'memory'
   redactions: number
   mode: RetrievalMode
@@ -60,6 +65,11 @@ export interface MemoryServiceOptions {
   /** Build association edges when a memory is saved. */
   associateOnSave?: boolean
   graph?: GraphChannelOptions
+  /**
+   * Local sentence-embedding model to load in the background. Retrieval runs
+   * on the lexical fallback until it is ready, and never stops if it fails.
+   */
+  localModel?: { model: string; cacheDir?: string; mirror?: string } | null
 }
 
 class DefaultMemoryService implements MemoryService {
@@ -68,13 +78,41 @@ class DefaultMemoryService implements MemoryService {
   private readonly retrievers = new Map<RetrievalMode, Retriever>()
   private readonly graph: GraphChannel
   private readonly options: MemoryServiceOptions
+  private adaptive: AdaptiveEmbedder | null = null
   private redactions = 0
 
   constructor(options: MemoryServiceOptions) {
     this.options = options
     this.store = options.store ?? openStore({ path: options.path })
-    this.embedder = options.embedder ?? new LexicalEmbedder()
+    this.embedder = options.embedder ?? this.buildEmbedder()
     this.graph = graphChannel(this.store, options.graph ?? {})
+  }
+
+  private buildEmbedder(): Embedder {
+    const local = this.options.localModel
+    if (!local) return new LexicalEmbedder()
+    const adaptive = new AdaptiveEmbedder({
+      fallback: new LexicalEmbedder(),
+      load: () => loadOnnxEmbedder(local),
+      // Vectors are never compared across models, so everything written while
+      // the fallback was serving has to be re-embedded before it is findable.
+      onReady: () => { void this.backfill() },
+    })
+    this.adaptive = adaptive
+    adaptive.start()
+    return adaptive
+  }
+
+  private async backfill(): Promise<void> {
+    try {
+      const scopes = this.store.scopes()
+      let processed = 0
+      do {
+        processed = (await backfillVectors(this.store, this.embedder, { scopes, batch: 64 })).processed
+      } while (processed > 0)
+    } catch {
+      // Old vectors simply stay unusable; retrieval still works on the rest.
+    }
   }
 
   private retrieverFor(mode: RetrievalMode): Retriever {
@@ -165,6 +203,7 @@ class DefaultMemoryService implements MemoryService {
     return {
       units: this.store.countUnits(),
       embedder: this.embedder.id,
+      embedderLoading: this.adaptive?.status() ?? null,
       lexicalIndex: this.store.capabilities.lexicalIndex,
       redactions: this.redactions,
       mode,

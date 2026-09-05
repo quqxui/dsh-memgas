@@ -1,12 +1,12 @@
 # dsh-memgas
 
-> **状态：路线图 M0–M5 的功能已全部实现（2026-09-05）**，233 个测试覆盖，并在真实 dsh 中验证过加载。尚未发布到 npm，`memgas-mcp` 与其他 agent 的互通尚未实测。英文版 README 在首个发布版本前补齐。
+> **状态：路线图 M0–M5 的功能已全部实现（2026-09-05）**，253 个测试覆盖，并在真实 dsh 中验证过加载。尚未发布到 npm，`memgas-mcp` 与其他 agent 的互通尚未实测。英文版 README 在首个发布版本前补齐。
 
 ## 开发
 
 ```sh
 pnpm install
-pnpm test        # vitest，233 个测试
+pnpm test        # vitest，253 个测试
 pnpm run build   # tsc -b，同时做类型检查
 ```
 
@@ -230,12 +230,12 @@ dsh 接线点（全部为官方文档记录的扩展点，不改核心）：
 
 默认行为：插件首次激活时，在后台自动下载一个小型 embedding 模型到本地缓存，下载期间用词法向量兜底，模型就绪后自动切换并对已有单元补算向量。
 
-- 运行时：`@huggingface/transformers`（transformers.js）在 Node 中通过 onnxruntime 推理，无需 Python。
+- 运行时：`@huggingface/transformers`（transformers.js）在 Node 中通过 onnxruntime 推理，无需 Python。**它不是本插件的依赖**（连可选依赖也不是），需要本地模型时由用户自行安装：`pnpm add @huggingface/transformers`。原因见决策记录。
 - 默认模型：`multilingual-e5-small` 的量化 ONNX 版本（约 100–130 MB，中英混合场景下效果与体积的折中；具体数字在 M1 实测后更新）。可选 `bge-small-zh-v1.5`（中文优先）、`bge-small-en-v1.5`（英文优先）。
 - 缓存位置：`$DSH_HOME/memgas/models/`，可配置。
 - 镜像：读取 `HF_ENDPOINT` 环境变量，并在配置中提供 `embedder.mirror` 字段（国内用户可指向 hf-mirror.com）。
-- 降级链：远程 API（若配置）→ 本地 ONNX → 词法向量。任何一级不可用自动降到下一级，`/memory status` 显示当前生效的 embedder。下载失败不重试轰炸：指数退避，失败期间插件功能不受影响，只是 C2 通道用词法向量。
-- 一致性：每个单元记录建索引时的 `embedderId`；切换模型后触发全量重算，重算完成前旧索引继续服务，混用期间 C2 只在同 `embedderId` 的子集内比较。
+- 降级链：本地 ONNX → 词法向量。模型加载期间与加载失败后都由词法向量顶替，`/memory status` 显示当前生效的 embedder 及加载状态与失败原因。
+- 一致性：每个单元记录建索引时的 `embedderId`，向量从不跨模型比较。模型就绪后后台分批补算（`backfillVectors`），补算期间旧索引继续服务。
 
 ## 提示词策略
 
@@ -289,11 +289,9 @@ dsh 接线点（全部为官方文档记录的扩展点，不改核心）：
     mode: hybrid            # lite | hybrid | memgas
     scope:
       projectKey: git-remote   # git-remote | cwd | manual
-    embedder:
-      provider: local          # local | api | lexical
-      model: multilingual-e5-small
-      mirror: null             # 例如 https://hf-mirror.com
-      cacheDir: null           # 默认 $DSH_HOME/memgas/models
+    localModel: null           # 置为 { model: multilingual-e5-small } 启用本地模型
+                               # 可选字段：cacheDir、mirror（例如 https://hf-mirror.com）
+    confirmWrites: false       # true 时自动收割的事实进入 /memory review 队列
     recall:
       k: 8
       baselineFloor: 0.5       # C1+C2 在最终结果中的保底席位比例
@@ -351,10 +349,10 @@ dsh-memgas/
 全部里程碑的功能均已实现，以下保留原计划与实际落地的对照。
 
 1. **M0 脚手架**（已完成）：pnpm workspace、三包骨架、从源码检出的 dsh 用 `--patch` 加载、`dsh plugin add` 链路验证。
-2. **M1 基线可用**（已完成，除本地 ONNX embedder）：SQLite 存储、FTS5 词法索引、向量索引、词法 embedder、C1+C2 双通道加 RRF 融合、三个工具。本地 ONNX embedder 的自动下载与降级链**尚未实现**，目前只有词法 embedder；接口（`Embedder`）与降级位置已经预留。
+2. **M1 基线可用**（已完成）：SQLite 存储、FTS5 词法索引、向量索引、词法 embedder、本地 ONNX embedder 与降级链、C1+C2 双通道加 RRF 融合、三个工具。
 3. **M2 自动收割与提示词**（已完成）：`session/event` 收割、compaction 收割、提示词与 schema 校验、后台队列、主动注入、常驻段、使用回执。
 4. **M3 增强通道**（已完成）：多粒度 + 熵路由（C3）、GMM 关联图 + PPR（C4）、健康检查与降级阶梯、可选 LLM 过滤、`lite` / `hybrid` / `memgas` 三种模式。
-5. **M4 演化**（已完成，除 review 队列）：调和、强化、衰减、抽象、重关联，全部由 `EvolutionRunner` 按事件调度；`/memory` 提供 status / search / diag / list / forget / restore / pin / export / purge。`confirmWrites` 的待确认队列（`/memory review`）**尚未实现**。
+5. **M4 演化**（已完成）：调和、强化、衰减、抽象、重关联，全部由 `EvolutionRunner` 按事件调度；`/memory` 提供 status / search / diag / list / forget / restore / pin / review / export / purge，含 `confirmWrites` 的待确认队列。
 6. **M5 memgas-mcp 与发布**（MCP server 已完成，发布未做）：`memgas-mcp` 提供 stdio JSON-RPC 与五个工具，与插件共用同一套存储布局。跨 agent 共享记忆库**尚未实测**；npm 发布、英文 README、Web UI 设置卡片都还没做。
 
 ## 决策记录
@@ -384,7 +382,10 @@ dsh-memgas/
 - 2026-09-05：调和只在事实已入库之后进行。收割器先写入再调和，模型不可用时最坏结果是留下一条冗余记忆，而不是丢掉一条有效记忆。duplicate 会物理删除刚写入的重复件并给原件加权，update 走 supersede 版本链，contradict 两条都留下并记一条 `contradicts` 边。
 - 2026-09-05：抽象是叠加而非替换。来源单元保持 active，抽象单元记录 `derivedFrom` 并以较低置信度起步。
 - 2026-09-05：衰减只归档不删除，`pinned` 类型完全豁免。物理删除只有 `/memory purge --yes` 一个入口。
-- 2026-09-05：`memgas-mcp` 没有自己的模型，`memory_ingest` 直接原文入库而不做摘要。宁可让 MCP 侧的记忆质量低于插件侧，也不引入第二套模型配置。SQLite 的 unicode61 分词器把整段连续中文当成一个 token，无法部分匹配；索引与查询都改用相邻汉字组成的 bigram，词法通道因此对中文可用。
+- 2026-09-05：`memgas-mcp` 没有自己的模型，`memory_ingest` 直接原文入库而不做摘要。宁可让 MCP 侧的记忆质量低于插件侧，也不引入第二套模型配置。
+- 2026-09-05：`@huggingface/transformers` 不作为依赖声明，连 optional peer 也不是。pnpm 默认会安装可选 peer 依赖，那会把 `onnxruntime-node` 与 `sharp` 拖进每一次 `dsh plugin add`，撞上构建脚本授权门槛——正是选择 `node:sqlite` 时要绕开的那道坎。需要本地模型的用户自行安装，装之前一直用词法向量。
+- 2026-09-05：本地模型异步加载，加载完成后后台分批补算向量。写入不能等模型下载，所以期间的记忆先带词法 embedder 的 id，就绪后再重算。
+- 2026-09-05：`confirmWrites` 打开时，收割出的摘要、事实与关键词都以 `pending` 状态入库，原始轮次照常可检索。这样即使用户从不处理队列，会话内容也不会丢。SQLite 的 unicode61 分词器把整段连续中文当成一个 token，无法部分匹配；索引与查询都改用相邻汉字组成的 bigram，词法通道因此对中文可用。
 
 ## 未决问题
 

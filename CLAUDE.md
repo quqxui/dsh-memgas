@@ -6,12 +6,12 @@ DeepSeek Harness (dsh) 的长期记忆插件：存储 + 演化 + 检索利用。
 
 **设计文档就是 `README.md`。改设计先改 README，再改代码。**
 
-当前阶段：路线图 M0–M5 的功能已全部实现，共 233 个测试。仍缺三块：本地 ONNX embedder（自动下载 + 降级链）、`/memory review` 待确认队列、npm 发布。动手前先读 README 的「设计原则」「路线图」「决策记录」「未决问题」。
+当前阶段：路线图 M0–M5 的功能已全部实现，共 253 个测试。剩下的是发布相关：npm 发布（含 `@memgas/core` 的 workspace 依赖问题）、英文 README、跨 agent 共享记忆库实测、Web UI 卡片。动手前先读 README 的「设计原则」「路线图」「决策记录」「未决问题」。
 
 三个包：`packages/core`（存储与图、四条检索通道、融合、收割器、提示词、演化六过程、诊断）、`packages/dsh-plugin`（三个工具、`/memory` 命令、事件映射、pre-step 注入、按会话分作用域）、`packages/mcp`（stdio JSON-RPC server）。
 
 ```sh
-pnpm test        # 全量测试，当前 233 个
+pnpm test        # 全量测试，当前 253 个
 pnpm run build   # tsc -b，兼做类型检查
 ```
 
@@ -24,7 +24,8 @@ pnpm run build   # tsc -b，兼做类型检查
 - 核心库对模型只依赖 `LlmClient`（文本进文本出，可带 sessionId），对宿主事件只依赖 `HarvestEvent`；dsh 侧的映射在 `packages/dsh-plugin/src/session-events.ts` 与 `llm-client.ts`。测试用假 ctx 走整条链路，不 mock 内部。
 - 插件的 `apply` 返回一个 handle（`idle()` / `defaultScope` / `scopeForSession()` / `memory` / `evolutionStats()`）供测试使用；Cordis 忽略返回值。
 - 每个作用域一个 `Workspace`（store + harvester + evolution + queue），按会话的 `cwd` 解析，见 `packages/dsh-plugin/src/index.ts`。
-- 词法 embedder 在小库上几乎召回全部条目（哈希碰撞产生伪相似度）。要构造"基线够不到"的检索场景，测试里注入一个正交的 embedder，见 `packages/core/tests/service-modes.test.ts` 的 `TopicEmbedder`。
+- 词法 embedder 在小库上几乎召回全部条目（哈希碰撞产生伪相似度）。要构造「基线够不到」的检索场景，测试里注入一个正交的 embedder，见 `packages/core/tests/service-modes.test.ts` 的 `TopicEmbedder`。
+- **不要给任何包加 `@huggingface/transformers` 依赖**（optional peer 也不行）：pnpm 默认安装可选 peer，会把 onnxruntime-node 与 sharp 拖进用户的 `dsh plugin add` 并撞上构建授权门槛。它只通过运行时动态 import 使用，装不上就回落词法向量。
 
 ## 对外文案约束（作者要求，优先级最高）
 

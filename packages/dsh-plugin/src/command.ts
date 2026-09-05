@@ -20,6 +20,8 @@ const USAGE = `/memory 用法：
   forget <id>         归档一条记忆（可恢复，不删除）
   restore <id>        把归档的记忆恢复为启用
   pin <id>            标记为常驻，不受自动衰减影响
+  review [accept <id> | reject <id> | accept-all]
+                      处理等待确认的记忆（仅在 confirmWrites 打开时会有）
   export              以 JSON 导出本项目的记忆
   purge --yes         物理删除本项目的全部记忆（不可恢复）`
 
@@ -86,6 +88,31 @@ export async function runMemoryCommand(input: string, context: CommandContext): 
       memory.store.patch(argument, { status: 'active', updatedAt: Date.now() })
       memory.store.pin(argument)
       return ok(`已把 ${argument} 标记为常驻，不再参与自动衰减。`)
+    }
+
+    case 'review': {
+      const [action, id] = rest
+      const pending = () => memory.store.listUnits({ scopes: [scope], statuses: ['pending'], limit: 50 })
+
+      if (!action) {
+        const waiting = pending()
+        if (waiting.length === 0) return ok('没有等待确认的记忆。')
+        const listed = waiting.map(unit => formatCard(unit)).join('\n\n')
+        return ok(`${waiting.length} 条记忆等待确认：\n\n${listed}\n\n用 /memory review accept <id> 采纳，reject <id> 丢弃，accept-all 全部采纳。`)
+      }
+
+      if (action === 'accept-all') {
+        const waiting = pending()
+        for (const unit of waiting) memory.store.patch(unit.id, { status: 'active', updatedAt: Date.now() })
+        return ok(`已采纳 ${waiting.length} 条记忆。`)
+      }
+
+      if (action !== 'accept' && action !== 'reject') return fail('用法：/memory review [accept <id> | reject <id> | accept-all]')
+      if (!id) return fail(`用法：/memory review ${action} <id>`)
+      const unit = memory.store.get(id)
+      if (!unit || unit.status !== 'pending') return fail(`没有这条待确认的记忆：${id}`)
+      memory.store.patch(id, { status: action === 'accept' ? 'active' : 'archived', updatedAt: Date.now() })
+      return ok(action === 'accept' ? `已采纳 ${id}。` : `已丢弃 ${id}（仍可用 /memory restore 恢复）。`)
     }
 
     case 'export': {

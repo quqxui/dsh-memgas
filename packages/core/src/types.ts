@@ -1,5 +1,6 @@
 export type Granularity = 'session' | 'turn' | 'summary' | 'keyword'
-export type UnitStatus = 'active' | 'superseded' | 'archived'
+/** `pending` holds a harvested fact until the user confirms it. */
+export type UnitStatus = 'active' | 'superseded' | 'archived' | 'pending'
 
 export interface Provenance {
   occurredAt: number

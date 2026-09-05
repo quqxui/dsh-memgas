@@ -36,7 +36,7 @@ export interface UnitQuery {
   kinds?: string[]
 }
 
-export type UnitPatch = Partial<Pick<MemoryUnit, 'status' | 'supersededBy' | 'importance' | 'version' | 'updatedAt' | 'content' | 'confidence'>>
+export type UnitPatch = Partial<Pick<MemoryUnit, 'status' | 'supersededBy' | 'importance' | 'version' | 'updatedAt' | 'content' | 'confidence' | 'embedderId'>>
 
 export interface ListOptions {
   scopes: string[]
@@ -70,6 +70,8 @@ export interface MemoryStore {
   touch(ids: string[], at: number): void
   getMeta(key: string): string | null
   setMeta(key: string, value: string): void
+  /** Every scope that has at least one unit. */
+  scopes(): string[]
   putVector(id: string, embedderId: string, vector: Float32Array): void
   searchLexical(query: string, opts: SearchOptions): Candidate[]
   searchDense(vector: Float32Array, opts: SearchOptions & { embedderId: string }): Candidate[]
@@ -307,6 +309,7 @@ class SqliteMemoryStore implements MemoryStore {
       updatedAt: 'updated_at',
       content: 'content',
       confidence: 'confidence',
+      embedderId: 'embedder_id',
     }
     const sets: string[] = []
     const params: unknown[] = []
@@ -400,6 +403,11 @@ class SqliteMemoryStore implements MemoryStore {
     this.db
       .prepare(`UPDATE units SET access_count = access_count + 1, last_accessed_at = ? WHERE id IN (${placeholders})`)
       .run(at, ...ids)
+  }
+
+  scopes(): string[] {
+    const rows = this.db.prepare('SELECT DISTINCT scope FROM units').all() as { scope: string }[]
+    return rows.map(row => row.scope)
   }
 
   getMeta(key: string): string | null {

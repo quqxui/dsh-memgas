@@ -34,6 +34,8 @@ export interface HarvesterOptions {
   minTurnChars?: number
   maxTranscriptChars?: number
   sessionSummaryEvery?: number
+  /** Park model-derived facts as `pending` until the user accepts them. */
+  confirmWrites?: boolean
   cwd?: string
   gitBranch?: string
   now?: () => number
@@ -48,7 +50,7 @@ interface SessionState {
   completedTurns: number
 }
 
-const DEFAULTS = { minTurnChars: 80, maxTranscriptChars: 6000, sessionSummaryEvery: 8 }
+const DEFAULTS = { minTurnChars: 80, maxTranscriptChars: 6000, sessionSummaryEvery: 8, confirmWrites: false }
 const EXTRACTION_MAX_TOKENS = 1200
 
 function newId(): string {
@@ -172,6 +174,7 @@ export class Harvester {
     confidence?: number | null
     importance?: number
     promptVersion?: string | null
+    status?: MemoryUnit['status']
   }): MemoryUnit {
     const now = this.opts.now()
     return {
@@ -184,7 +187,7 @@ export class Harvester {
       importance: input.importance ?? 0.5,
       accessCount: 0,
       lastAccessedAt: null,
-      status: 'active',
+      status: input.status ?? 'active',
       supersededBy: null,
       version: 1,
       promptVersion: input.promptVersion ?? null,
@@ -202,7 +205,7 @@ export class Harvester {
     for (const unit of units) {
       // Only structured facts are worth reconciling; raw turns and keyword
       // lists have no counterpart to compare against.
-      if (unit.granularity === 'summary' && unit.kind) this.opts.onUnitStored?.(unit.id)
+      if (unit.granularity === 'summary' && unit.kind && unit.status === 'active') this.opts.onUnitStored?.(unit.id)
     }
     const vectors = await this.opts.embedder.embed(units.map(unit => unit.content))
     units.forEach((unit, index) => {
@@ -252,9 +255,18 @@ export class Harvester {
     const extraction = await this.extract(built, sessionId, signal)
     if (!extraction) return null
 
+    // Under confirmWrites the model's conclusions wait for the user; the raw
+    // turn above is already stored either way.
+    const status = this.opts.confirmWrites ? ('pending' as const) : ('active' as const)
     const units: MemoryUnit[] = []
     if (extraction.summary) {
-      units.push(this.unit({ granularity: 'summary', content: extraction.summary, provenance, promptVersion: built.version }))
+      units.push(this.unit({
+        granularity: 'summary',
+        content: extraction.summary,
+        provenance,
+        promptVersion: built.version,
+        status,
+      }))
     }
     for (const fact of extraction.facts) {
       units.push(this.unit({
@@ -265,10 +277,17 @@ export class Harvester {
         confidence: fact.confidence,
         importance: fact.confidence,
         promptVersion: built.version,
+        status,
       }))
     }
     if (extraction.keywords.length > 0) {
-      units.push(this.unit({ granularity: 'keyword', content: extraction.keywords.join(', '), provenance, promptVersion: built.version }))
+      units.push(this.unit({
+        granularity: 'keyword',
+        content: extraction.keywords.join(', '),
+        provenance,
+        promptVersion: built.version,
+        status,
+      }))
     }
     await this.persist(units)
     return extraction.summary || null

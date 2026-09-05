@@ -57,6 +57,17 @@ describe('Harvester', () => {
     expect(store.searchLexical('store.ts 超时', { limit: 5 }).length).toBeGreaterThan(0)
   })
 
+  test('parks extracted facts for confirmation when asked to', async () => {
+    const harvester = harvesterWith(store, new FakeLlm(extraction), { confirmWrites: true })
+    harvester.observe('s1', { type: 'user', turn: 1, text: longUser })
+    harvester.observe('s1', { type: 'turn-end', turn: 1, completed: true })
+    await harvester.idle()
+    // The raw turn is still stored and searchable; only the model-derived
+    // facts wait for confirmation.
+    expect(store.listUnits({ scopes: ['project:p'], statuses: ['pending'], limit: 10 }).length).toBeGreaterThan(0)
+    expect(store.listActive({ scopes: ['project:p'], limit: 10 }).map(u => u.granularity)).toEqual(['turn'])
+  })
+
   test('skips a turn shorter than the minimum without calling the model', async () => {
     const llm = new FakeLlm(extraction)
     const harvester = harvesterWith(store, llm)

@@ -92,6 +92,10 @@ export interface Config {
   denseThreshold?: number
   injectBudgetTokens?: number
   sectionBudgetTokens?: number
+  /** Local sentence-embedding model; null keeps the lexical fallback. */
+  localModel?: { model: string; cacheDir?: string; mirror?: string } | null
+  /** Park harvested facts until the user accepts them with `/memory review`. */
+  confirmWrites?: boolean
   /** Run the background maintenance processes. */
   evolve?: boolean
   halfLifeDays?: number
@@ -121,6 +125,8 @@ const DEFAULTS = {
   denseThreshold: 0.6,
   injectBudgetTokens: 600,
   sectionBudgetTokens: 400,
+  localModel: null as Config['localModel'],
+  confirmWrites: false,
   evolve: true,
   halfLifeDays: 30,
   archiveBelow: 0.15,
@@ -174,6 +180,7 @@ export function apply(ctx: ContextLike, config: Config = {}): PluginHandle {
       mode: settings.mode,
       coldStartUnits: 0,
       associateOnSave: true,
+      localModel: settings.localModel,
     }
     if (dataDir === ':memory:') return { memory: createMemoryService({ path: ':memory:', ...options }), warning: null }
     try {
@@ -217,6 +224,7 @@ export function apply(ctx: ContextLike, config: Config = {}): PluginHandle {
       queue,
       scope,
       minTurnChars: settings.minTurnChars,
+      confirmWrites: settings.confirmWrites,
       cwd: defaultCwd,
       onUnitStored: id => evolution.onFactStored(id),
     })
@@ -248,8 +256,10 @@ export function apply(ctx: ContextLike, config: Config = {}): PluginHandle {
     const harvest = workspace.harvester.stats()
     const jobs = workspace.queue.stats()
     const evolve = workspace.evolution.stats()
+    const pending = workspace.memory.store.listUnits({ scopes: [workspace.scope], statuses: ['pending'], limit: 200 })
     return handleStatus(workspace.memory, workspace.warning, [
       `作用域：${workspace.scope}`,
+      ...(pending.length > 0 ? [`待确认：${pending.length} 条（用 /memory review 处理）`] : []),
       `自动收割：已收割 ${harvest.harvestedTurns} 轮，跳过过短 ${harvest.skippedShort} 轮，抽取失败 ${harvest.extractionFailures} 次` +
         (harvest.lastFailure ? `（最近：${harvest.lastFailure}）` : ''),
       `演化：调和 ${evolve.reconciled}，归档 ${evolve.archived}，抽象 ${evolve.abstracted}，重关联 ${evolve.reassociations}` +

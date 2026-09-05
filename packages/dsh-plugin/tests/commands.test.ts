@@ -88,6 +88,48 @@ describe('runMemoryCommand', () => {
     expect(memory.status().units).toBe(0)
   })
 
+  test('review lists facts waiting for confirmation', async () => {
+    const memory = await seeded()
+    const pending = (await memory.save({ content: '端口是 8080', scope: 'project:p', kind: 'environment' }))!
+    memory.store.patch(pending.id, { status: 'pending' })
+    const result = await runMemoryCommand('review', { ...ctx(), memory })
+    expect(result.text).toContain('8080')
+    expect(result.text).toContain(pending.id)
+  })
+
+  test('review says so when the queue is empty', async () => {
+    const memory = await seeded()
+    const result = await runMemoryCommand('review', { ...ctx(), memory })
+    expect(result.text).toContain('没有')
+  })
+
+  test('accepting a pending fact makes it retrievable', async () => {
+    const memory = await seeded()
+    const pending = (await memory.save({ content: '端口是 8080', scope: 'project:p', kind: 'environment' }))!
+    memory.store.patch(pending.id, { status: 'pending' })
+    await runMemoryCommand(`review accept ${pending.id}`, { ...ctx(), memory })
+    expect(memory.store.get(pending.id)!.status).toBe('active')
+  })
+
+  test('rejecting a pending fact archives it instead of deleting it', async () => {
+    const memory = await seeded()
+    const pending = (await memory.save({ content: '端口是 8080', scope: 'project:p', kind: 'environment' }))!
+    memory.store.patch(pending.id, { status: 'pending' })
+    await runMemoryCommand(`review reject ${pending.id}`, { ...ctx(), memory })
+    expect(memory.store.get(pending.id)!.status).toBe('archived')
+  })
+
+  test('review accept-all clears the whole queue', async () => {
+    const memory = await seeded()
+    for (const content of ['端口是 8080', '超时 500ms']) {
+      const unit = (await memory.save({ content, scope: 'project:p', kind: 'environment' }))!
+      memory.store.patch(unit.id, { status: 'pending' })
+    }
+    const result = await runMemoryCommand('review accept-all', { ...ctx(), memory })
+    expect(result.kind).toBe('success')
+    expect(memory.store.listUnits({ scopes: ['project:p'], statuses: ['pending'], limit: 10 })).toHaveLength(0)
+  })
+
   test('rejects an unknown subcommand', async () => {
     const memory = await seeded()
     const result = await runMemoryCommand('frobnicate', { ...ctx(), memory })
