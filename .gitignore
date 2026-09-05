@@ -1,7 +1,10 @@
 node_modules/
 lib/
-dist/
+# dist/ 见下方例外
 *.log
 .DS_Store
 .vitest/
 *.tsbuildinfo
+
+# 打包产物随仓库分发，让 github 安装开箱即用
+!dist/

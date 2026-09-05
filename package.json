@@ -1,17 +1,56 @@
 {
-  "name": "dsh-memgas-workspace",
-  "private": true,
+  "name": "dsh-memgas",
   "type": "module",
-  "engines": { "node": "^22.19.0 || >=24.0.0" },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
   "scripts": {
-    "build": "tsc -b",
+    "build": "tsc -b && node scripts/bundle.mjs",
+    "bundle": "node scripts/bundle.mjs",
     "typecheck": "tsc -b --pretty",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "esbuild": "^0.28.2",
     "typescript": "^5.9.0",
     "vitest": "^3.2.0"
+  },
+  "version": "0.2.0",
+  "description": "Long-term memory for DeepSeek Harness: multi-channel retrieval and an evolving memory store.",
+  "main": "dist/index.js",
+  "types": "packages/dsh-plugin/lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./packages/dsh-plugin/lib/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "memory",
+    "long-term-memory",
+    "agent",
+    "retrieval"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/quqxui/dsh-memgas.git"
+  },
+  "homepage": "https://github.com/quqxui/dsh-memgas#readme",
+  "bugs": {
+    "url": "https://github.com/quqxui/dsh-memgas/issues"
   }
 }

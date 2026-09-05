@@ -1,0 +1,7 @@
+# Applied when a profile lists this bundle. The row mounts the plugin by
+# package name so Node resolves the installed code.
+- insert:
+    - id: memgas
+      name: dsh-memgas
+      config:
+        k: 8

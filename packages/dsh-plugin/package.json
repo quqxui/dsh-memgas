@@ -1,5 +1,5 @@
 {
-  "name": "dsh-memgas",
+  "name": "@memgas/dsh-plugin-source",
   "version": "0.1.0",
   "description": "Long-term memory for DeepSeek Harness: store, evolve, recall.",
   "type": "module",
@@ -11,17 +11,8 @@
       "default": "./lib/index.js"
     }
   },
-  "files": [
-    "lib",
-    "cordis.patch.yml"
-  ],
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
-  },
-  "dsh": {
-    "bundle": {
-      "patch": "./cordis.patch.yml"
-    }
   },
   "keywords": [
     "dsh-plugin",
@@ -43,5 +34,6 @@
   "homepage": "https://github.com/quqxui/dsh-memgas#readme",
   "bugs": {
     "url": "https://github.com/quqxui/dsh-memgas/issues"
-  }
+  },
+  "private": true
 }
