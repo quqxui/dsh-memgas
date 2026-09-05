@@ -4,11 +4,11 @@
 
 DeepSeek Harness (dsh) 的长期记忆插件：存储 + 演化 + 检索利用。检索与关联算法的概念来自本项目作者的 ICLR 2026 论文 MemGAS。
 
-**设计文档就是 `README.md`。改设计先改 README，再改代码。**
+**面向使用者的落地页是根 `README.md`（中文）与 `README.en.md`（英文）；设计文档是 `docs/design.md`。改设计先改 `docs/design.md`，再改代码；改了对外行为要同步两份 README。**
 
 当前阶段：0.1.0 已发布到 npm（`dsh-memgas` / `memgas-core` / `memgas-mcp`），共 263 个测试，已在真实 dsh 上端到端验证过。剩下：英文 README、跨 agent 共享实测、Web UI 卡片、建 GitHub 远程并补 `repository` 字段。
 
-发布方式：`NPM_CONFIG_USERCONFIG=<带令牌的 npmrc> pnpm publish -r --access public --no-git-checks`。npm 账号开了 2FA，需要勾选 Bypass 2FA 的 granular token。`@memgas` scope 不存在，核心库用不带 scope 的 `memgas-core`。动手前先读 README 的「设计原则」「路线图」「决策记录」「未决问题」。
+发布方式：`NPM_CONFIG_USERCONFIG=<带令牌的 npmrc> pnpm publish -r --access public --no-git-checks`。npm 账号开了 2FA，需要勾选 Bypass 2FA 的 granular token。`@memgas` scope 不存在，核心库用不带 scope 的 `memgas-core`。动手前先读 `docs/design.md` 的「设计原则」「路线图」「决策记录」「未决问题」。
 
 三个包：`packages/core`（存储与图、四条检索通道、融合、收割器、提示词、演化六过程、诊断）、`packages/dsh-plugin`（三个工具、`/memory` 命令、事件映射、pre-step 注入、按会话分作用域）、`packages/mcp`（stdio JSON-RPC server）。
 

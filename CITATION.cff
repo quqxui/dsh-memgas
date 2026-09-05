@@ -1,0 +1,44 @@
+cff-version: 1.2.0
+title: dsh-memgas
+message: >-
+  If you use this software, please cite the paper its retrieval method
+  is based on.
+type: software
+authors:
+  - family-names: Xu
+    given-names: Derong
+abstract: >-
+  Long-term memory plugin for DeepSeek Harness: multi-channel retrieval
+  with rank fusion, and a background evolution loop that reconciles,
+  reinforces, decays and abstracts stored memories.
+license: MIT
+preferred-citation:
+  type: conference-paper
+  title: >-
+    From Single to Multi-Granularity: Toward Long-Term Memory Association
+    and Selection of Conversational Agents
+  collection-title: International Conference on Learning Representations (ICLR)
+  year: 2026
+  authors:
+    - family-names: Xu
+      given-names: Derong
+    - family-names: Wen
+      given-names: Yi
+    - family-names: Jia
+      given-names: Pengyue
+    - family-names: Zhang
+      given-names: Yingyi
+    - family-names: Zhang
+      given-names: Wenlin
+    - family-names: Wang
+      given-names: Yichao
+    - family-names: Guo
+      given-names: Huifeng
+    - family-names: Tang
+      given-names: Ruiming
+    - family-names: Zhao
+      given-names: Xiangyu
+    - family-names: Chen
+      given-names: Enhong
+    - family-names: Xu
+      given-names: Tong
