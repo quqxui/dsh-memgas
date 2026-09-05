@@ -20,12 +20,8 @@
   "version": "0.2.0",
   "description": "Long-term memory for DeepSeek Harness: multi-channel retrieval and an evolving memory store.",
   "main": "dist/index.js",
-  "types": "packages/dsh-plugin/lib/index.d.ts",
   "exports": {
-    ".": {
-      "types": "./packages/dsh-plugin/lib/index.d.ts",
-      "default": "./dist/index.js"
-    }
+    ".": "./dist/index.js"
   },
   "files": [
     "dist",
