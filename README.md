@@ -1,6 +1,12 @@
 # dsh-memgas
 
-> **状态：0.1.0，功能完整、待发布（2026-09-05）**。263 个测试覆盖，并在真实 dsh 0.1.2-rc.1 上做过端到端验证：模型自主写入记忆、自动收割蒸馏、跨会话主动召回、强化与关联建边、跨进程补做抽取都已跑通。三个包的 tarball 已验证可安装并加载。`memgas-mcp` 与第三方 agent 的互通尚未实测；英文 README 待补。
+> **状态：0.1.0 已发布（2026-09-05）**。263 个测试覆盖，并在真实 dsh 0.1.2-rc.1 上做过端到端验证：模型自主写入记忆、自动收割蒸馏、跨会话主动召回、强化与关联建边、跨进程补做抽取都已跑通。`memgas-mcp` 与第三方 agent 的互通尚未实测；英文 README 待补。
+
+```sh
+dsh plugin --profile web add dsh-memgas
+```
+
+npm 上的三个包：[`dsh-memgas`](https://www.npmjs.com/package/dsh-memgas)（dsh 插件）、[`memgas-core`](https://www.npmjs.com/package/memgas-core)（算法与存储）、[`memgas-mcp`](https://www.npmjs.com/package/memgas-mcp)（MCP server）。
 
 ## 开发
 
@@ -97,7 +103,7 @@ dsh-memgas 的差异化在三点：
 
 pnpm monorepo，三个包：
 
-- `@memgas/core`：纯 TypeScript 算法与存储库，零 dsh 依赖。包含记忆数据模型、SQLite 存储、词法索引、向量索引、Embedder 接口与实现、GMM、熵路由、PPR、融合器、演化调度器、提示词模板与结构化输出校验。可被任何 Node 程序引用。
+- `memgas-core`：纯 TypeScript 算法与存储库，零 dsh 依赖。包含记忆数据模型、SQLite 存储、词法索引、向量索引、Embedder 接口与实现、GMM、熵路由、PPR、融合器、演化调度器、提示词模板与结构化输出校验。可被任何 Node 程序引用。
 - `dsh-memgas`：dsh 插件（bundle）。只做接线：把 core 接到 dsh 的事件、工具、提示词、任务、命令与 LLM 接口上。
 - `memgas-mcp`：MCP server，用 core 暴露同一套记忆库给其他 agent。
 
@@ -336,7 +342,7 @@ dsh 接线点（全部为官方文档记录的扩展点，不改核心）：
 ```text
 dsh-memgas/
 ├── packages/
-│   ├── core/          # @memgas/core：模型、存储、索引、embedder、通道、融合、evolve、prompts
+│   ├── core/          # memgas-core：模型、存储、索引、embedder、通道、融合、evolve、prompts
 │   ├── dsh-plugin/    # dsh-memgas：bundle、cordis.patch.yml、dsh 接线
 │   └── mcp/           # memgas-mcp：MCP server
 ├── docs/              # 设计笔记、评测记录、ADR
@@ -353,19 +359,19 @@ dsh-memgas/
 3. **M2 自动收割与提示词**（已完成）：`session/event` 收割、compaction 收割、提示词与 schema 校验、后台队列、主动注入、常驻段、使用回执。
 4. **M3 增强通道**（已完成）：多粒度 + 熵路由（C3）、GMM 关联图 + PPR（C4）、健康检查与降级阶梯、可选 LLM 过滤、`lite` / `hybrid` / `memgas` 三种模式。
 5. **M4 演化**（已完成）：调和、强化、衰减、抽象、重关联，全部由 `EvolutionRunner` 按事件调度；`/memory` 提供 status / search / diag / list / forget / restore / pin / review / export / purge，含 `confirmWrites` 的待确认队列。
-6. **M5 memgas-mcp 与发布**：`memgas-mcp` 提供 stdio JSON-RPC 与五个工具，与插件共用同一套存储布局。三个包已就绪待发布（`@memgas/core` 一并发布，插件按 `^0.1.0` 依赖它）。跨 agent 共享记忆库**尚未实测**；英文 README、Web UI 设置卡片还没做。
+6. **M5 memgas-mcp 与发布**：`memgas-mcp` 提供 stdio JSON-RPC 与五个工具，与插件共用同一套存储布局。三个包已就绪待发布（`memgas-core` 一并发布，插件按 `^0.1.0` 依赖它）。跨 agent 共享记忆库**尚未实测**；英文 README、Web UI 设置卡片还没做。
 
 ## 决策记录
 
 - 2026-09-04：插件范围包含存储、演化、检索利用三部分，不只做检索。
-- 2026-09-04：命名 `dsh-memgas`（npm 包名同名，插件 id `memgas`，核心库 `@memgas/core`，MCP 包 `memgas-mcp`）。
+- 2026-09-04：命名 `dsh-memgas`（npm 包名同名，插件 id `memgas`，核心库 `memgas-core`，MCP 包 `memgas-mcp`）。
 - 2026-09-04：做 `memgas-mcp`。
 - 2026-09-04：默认 embedder 为首次激活时自动下载的本地小模型，词法向量兜底。
 - 2026-09-04：不移植论文提示词，自行设计面向编码 agent 的结构化提示词。
 - 2026-09-04：独立仓库，pnpm monorepo。
 - 2026-09-04：**论文机制作为可配置的增强通道，与基线通道并行**。词法与稠密检索作为永不关闭的基线，融合层设基线保底配额，保证最坏情况不劣于普通检索。
 - 2026-09-04：默认模式为 `hybrid`；`memgas` 模式放宽保底配额，给增强通道更大权重。
-- 2026-09-04：许可证倾向 MIT，待确认。
+- 2026-09-04：许可证 MIT。
 - 2026-09-05：存储用 Node 内置的 `node:sqlite`，不用 better-sqlite3。理由：原生模块需要 postinstall 构建，而 `dsh plugin add` 走的 pnpm ≥10 默认拦截构建脚本，会把「装上就能用」变成「先授权再重装」。代价是依赖宿主 Node 自带的 SQLite，因此 FTS5 在打开库时做能力探测，缺失时自动切到进程内的 JS 倒排索引（`capabilities.lexicalIndex` 会显示 `memory`）。
 - 2026-09-05：插件不在构建期依赖 dsh 的包。`@deepseek-ai/dsh-tools` 依赖未发布的 `@deepseek-ai/dsh-type-meta`，在 dsh 仓库外装不上；插件改为按 npm 上的 `.d.ts` 抄出所需接口的结构化类型（`ToolDefinition` = name/description/parameters + output.schema/render + execute），注册原始 JSON Schema 工具定义，与 MCP 工具进入注册表的路径一致。
 - 2026-09-05：插件必须导出 `inject = ['tools']`，且自身故障不得阻断 dsh 启动。集成测试发现：Cordis 在未声明 inject 时拒绝 `ctx.tools` 访问，并且该异常会让整棵插件树加载失败，即整个 dsh 起不来。现在 `apply` 把开库失败降级为内存库并在 `memory_status` 中说明。

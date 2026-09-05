@@ -1,5 +1,5 @@
 {
-  "name": "@memgas/core",
+  "name": "memgas-core",
   "version": "0.1.0",
   "type": "module",
   "main": "lib/index.js",
@@ -24,8 +24,5 @@
     "rrf",
     "agent",
     "long-term-memory"
-  ],
-  "publishConfig": {
-    "access": "public"
-  }
+  ]
 }

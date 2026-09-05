@@ -1,4 +1,4 @@
-import { createMemoryService, formatCard, type MemoryService, type RetrievalMode } from '@memgas/core'
+import { createMemoryService, formatCard, type MemoryService, type RetrievalMode } from 'memgas-core'
 
 export interface McpServer {
   handle(message: unknown): Promise<unknown>
@@ -13,7 +13,7 @@ export interface McpServerOptions {
 }
 
 const PROTOCOL_VERSION = '2025-06-18'
-const SERVER_INFO = { name: 'memgas', version: '0.0.1' }
+const SERVER_INFO = { name: 'memgas', version: '0.1.0' }
 const INGEST_MAX_CHARS = 8000
 
 interface ToolSpec {

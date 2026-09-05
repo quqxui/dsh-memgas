@@ -1,4 +1,4 @@
-import type { LlmClient } from '@memgas/core'
+import type { LlmClient } from 'memgas-core'
 import type { ModelRoute } from './session-events.ts'
 
 /** The part of `ctx.llm` this plugin calls. */

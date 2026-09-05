@@ -27,4 +27,4 @@ bundle 自带 `cordis.patch.yml`，安装后自动注册，无需手动 insert�
 
 ## 设计
 
-见仓库根 [README](../../README.md)。核心算法在 [`@memgas/core`](../core)，本包只负责与 dsh 接线。
+见仓库根 [README](../../README.md)。核心算法在 [`memgas-core`](../core)，本包只负责与 dsh 接线。

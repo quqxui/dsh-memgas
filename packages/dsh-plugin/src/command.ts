@@ -1,4 +1,4 @@
-import { formatCard, formatDiagnostics, type MemoryService } from '@memgas/core'
+import { formatCard, formatDiagnostics, type MemoryService } from 'memgas-core'
 
 export interface CommandContext {
   memory: MemoryService

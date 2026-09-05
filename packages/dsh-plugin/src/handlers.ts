@@ -1,4 +1,4 @@
-import { formatCard, type MemoryService, type RetrievalResult } from '@memgas/core'
+import { formatCard, type MemoryService, type RetrievalResult } from 'memgas-core'
 
 export { formatCard }
 

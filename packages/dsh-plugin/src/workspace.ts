@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
-import { GLOBAL_SCOPE, projectKeyFor } from '@memgas/core'
+import { GLOBAL_SCOPE, projectKeyFor } from 'memgas-core'
 
 export { GLOBAL_SCOPE }
 

@@ -5,7 +5,7 @@ import { mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { projectKeyFor, type RetrievalMode } from '@memgas/core'
+import { projectKeyFor, type RetrievalMode } from 'memgas-core'
 import { createMcpServer } from './server.ts'
 
 function gitRemote(cwd: string): string | null {

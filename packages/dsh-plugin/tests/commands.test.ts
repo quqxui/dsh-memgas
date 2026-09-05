@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { createMemoryService } from '@memgas/core'
+import { createMemoryService } from 'memgas-core'
 import { runMemoryCommand } from '../src/command.ts'
 
 async function seeded() {

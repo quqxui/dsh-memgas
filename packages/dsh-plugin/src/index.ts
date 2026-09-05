@@ -12,7 +12,7 @@ import {
   type EvolutionStats,
   type MemoryService,
   type RetrievalMode,
-} from '@memgas/core'
+} from 'memgas-core'
 import { handleSave, handleSearch, handleStatus } from './handlers.ts'
 import { resolveScope, storePathFor } from './workspace.ts'
 import { SessionEventMapper, type SessionEventLike } from './session-events.ts'

@@ -30,7 +30,7 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@memgas/core": "workspace:^"
+    "memgas-core": "workspace:^"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.2"

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { createMemoryService, type MemoryUnit } from '@memgas/core'
+import { createMemoryService, type MemoryUnit } from 'memgas-core'
 import { formatCard, handleSave, handleSearch, handleStatus } from '../src/handlers.ts'
 
 const unit = (overrides: Partial<MemoryUnit> = {}): MemoryUnit => ({

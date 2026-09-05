@@ -1,4 +1,4 @@
-import type { HarvestEvent } from '@memgas/core'
+import type { HarvestEvent } from 'memgas-core'
 
 export interface ModelRoute {
   provider: string

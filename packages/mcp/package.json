@@ -27,6 +27,6 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@memgas/core": "workspace:^"
+    "memgas-core": "workspace:^"
   }
 }
