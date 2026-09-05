@@ -2,6 +2,7 @@
 
 [![npm](https://img.shields.io/npm/v/dsh-memgas?label=dsh-memgas)](https://www.npmjs.com/package/dsh-memgas)
 [![npm](https://img.shields.io/npm/v/memgas-core?label=memgas-core)](https://www.npmjs.com/package/memgas-core)
+[![CI](https://github.com/quqxui/dsh-memgas/actions/workflows/ci.yml/badge.svg)](https://github.com/quqxui/dsh-memgas/actions/workflows/ci.yml)
 [![license](https://img.shields.io/npm/l/dsh-memgas)](./LICENSE)
 
 中文 | [English](./README.en.md)

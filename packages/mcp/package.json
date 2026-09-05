@@ -28,5 +28,14 @@
   "license": "MIT",
   "dependencies": {
     "memgas-core": "workspace:^"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/quqxui/dsh-memgas.git",
+    "directory": "packages/mcp"
+  },
+  "homepage": "https://github.com/quqxui/dsh-memgas#readme",
+  "bugs": {
+    "url": "https://github.com/quqxui/dsh-memgas/issues"
   }
 }

@@ -24,5 +24,14 @@
     "rrf",
     "agent",
     "long-term-memory"
-  ]
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/quqxui/dsh-memgas.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/quqxui/dsh-memgas#readme",
+  "bugs": {
+    "url": "https://github.com/quqxui/dsh-memgas/issues"
+  }
 }
