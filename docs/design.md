@@ -1,6 +1,6 @@
 # dsh-memgas 设计文档
 
-> 这是内部设计文档：取舍、决策记录和未决问题。**面向使用者的说明在[根 README](../README.md)。**
+> 这是内部设计文档：取舍、决策记录和未决问题。**面向使用者的说明：[English](../README.md) | [简体中文](../README.zh-CN.md)。**
 >
 > 状态：0.1.0 已发布（2026-09-05），263 个测试，已在真实 dsh 0.1.2-rc.1 上端到端验证。
 
@@ -348,8 +348,9 @@ dsh-memgas/
 │   ├── dsh-plugin/    # dsh-memgas：bundle、cordis.patch.yml、dsh 接线
 │   └── mcp/           # memgas-mcp：MCP server
 ├── docs/              # 设计笔记、评测记录、ADR
-├── README.md
-└── README.zh.md       # 发布前补齐（当前以中文 README.md 为准）
+├── README.md          # 英文（默认）
+├── README.en.md       # 旧英文链接入口，指向 README.md
+└── README.zh-CN.md    # 简体中文
 ```
 
 ## 路线图
@@ -361,7 +362,7 @@ dsh-memgas/
 3. **M2 自动收割与提示词**（已完成）：`session/event` 收割、compaction 收割、提示词与 schema 校验、后台队列、主动注入、常驻段、使用回执。
 4. **M3 增强通道**（已完成）：多粒度 + 熵路由（C3）、GMM 关联图 + PPR（C4）、健康检查与降级阶梯、可选 LLM 过滤、`lite` / `hybrid` / `memgas` 三种模式。
 5. **M4 演化**（已完成）：调和、强化、衰减、抽象、重关联，全部由 `EvolutionRunner` 按事件调度；`/memory` 提供 status / search / diag / list / forget / restore / pin / review / export / purge，含 `confirmWrites` 的待确认队列。
-6. **M5 memgas-mcp 与发布**：`memgas-mcp` 提供 stdio JSON-RPC 与五个工具，与插件共用同一套存储布局。三个包已就绪待发布（`memgas-core` 一并发布，插件按 `^0.1.0` 依赖它）。跨 agent 共享记忆库**尚未实测**；英文 README、Web UI 设置卡片还没做。
+6. **M5 memgas-mcp 与发布**：`memgas-mcp` 提供 stdio JSON-RPC 与五个工具，与插件共用同一套存储布局。三个包已就绪待发布（`memgas-core` 一并发布，插件按 `^0.1.0` 依赖它）。跨 agent 共享记忆库**尚未实测**；Web UI 设置卡片还没做。
 
 ## 决策记录
 

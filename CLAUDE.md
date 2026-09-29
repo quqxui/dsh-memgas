@@ -4,9 +4,9 @@
 
 DeepSeek Harness (dsh) 的长期记忆插件：存储 + 演化 + 检索利用。检索与关联算法的概念来自本项目作者的 ICLR 2026 论文 MemGAS。
 
-**面向使用者的落地页是根 `README.md`（中文）与 `README.en.md`（英文）；设计文档是 `docs/design.md`。改设计先改 `docs/design.md`，再改代码；改了对外行为要同步两份 README。**
+**面向使用者的落地页是根 `README.md`（英文，默认）与 `README.zh-CN.md`（简体中文）；`README.en.md` 保留为旧英文链接入口；设计文档是 `docs/design.md`。改设计先改 `docs/design.md`，再改代码；改了对外行为要同步两份 README。**
 
-当前阶段：0.1.0 已发布到 npm（`dsh-memgas` / `memgas-core` / `memgas-mcp`），共 263 个测试，已在真实 dsh 上端到端验证过。剩下：英文 README、跨 agent 共享实测、Web UI 卡片、建 GitHub 远程并补 `repository` 字段。
+当前阶段：0.1.0 已发布到 npm（`dsh-memgas` / `memgas-core` / `memgas-mcp`），共 263 个测试，已在真实 dsh 上端到端验证过。剩下：跨 agent 共享实测、Web UI 卡片、建 GitHub 远程并补 `repository` 字段。
 
 发布方式：`NPM_CONFIG_USERCONFIG=<带令牌的 npmrc> pnpm publish -r --access public --no-git-checks`。npm 账号开了 2FA，需要勾选 Bypass 2FA 的 granular token。`@memgas` scope 不存在，核心库用不带 scope 的 `memgas-core`。动手前先读 `docs/design.md` 的「设计原则」「路线图」「决策记录」「未决问题」。
 
@@ -71,5 +71,5 @@ dsh 处于 developer preview，接口会有破坏性变更。实现时以当时�
 ## 其他约定
 
 - 提示词自行设计，不移植论文附录模板（见 README「提示词策略」）。所有提示词版本化，记忆单元记录生成它的提示词版本。
-- 中文优先：README、注释、提示词面向中英混合场景，记忆内容保留原语言不翻译。
+- README 默认英文，并维护简体中文版；注释、提示词仍以中文为主，面向中英混合场景，记忆内容保留原语言不翻译。
 - 工具链：Node 26、pnpm 11 已装。

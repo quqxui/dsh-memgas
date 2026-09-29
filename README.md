@@ -5,125 +5,127 @@
 [![CI](https://github.com/quqxui/dsh-memgas/actions/workflows/ci.yml/badge.svg)](https://github.com/quqxui/dsh-memgas/actions/workflows/ci.yml)
 [![license](https://img.shields.io/npm/l/dsh-memgas)](./LICENSE)
 
-中文 | [English](./README.en.md)
+**English** | [简体中文](./README.zh-CN.md)
 
-**[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（dsh）的长期记忆插件。** 让 agent 跨会话记住这个项目的约定、决策和踩过的坑，并随着使用不断整理、更新、遗忘。
+**Long-term memory for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (dsh).** Your agent remembers this project's conventions, decisions and pitfalls across sessions, and keeps that memory organized as you work.
 
-检索用的多粒度关联与自适应选择方法来自 ICLR 2026 论文 *[From Single to Multi-Granularity: Toward Long-Term Memory Association and Selection of Conversational Agents](https://github.com/Applied-Machine-Learning-Lab/ICLR2026_MemGAS)*（MemGAS）。
+Retrieval builds on the multi-granularity association and adaptive selection method from the ICLR 2026 paper *[From Single to Multi-Granularity: Toward Long-Term Memory Association and Selection of Conversational Agents](https://github.com/Applied-Machine-Learning-Lab/ICLR2026_MemGAS)* (MemGAS).
 
-## 安装
+## Install
 
 ```sh
-dsh plugin --profile web add dsh-memgas              # 从 npm
-dsh plugin --profile web add github:quqxui/dsh-memgas # 或直接从 GitHub
+dsh plugin --profile web add dsh-memgas               # from npm
+dsh plugin --profile web add github:quqxui/dsh-memgas # or straight from GitHub
 ```
 
-两种方式等价。仓库里带了打包好的单文件产物，从 GitHub 装不需要构建、不需要给 pnpm 构建授权、也不会拉任何运行时依赖——插件本身只用 Node 内置模块。
+Both are equivalent. The repository ships a prebuilt single-file artifact, so a GitHub install needs no build step, no pnpm build authorization and pulls no runtime dependencies — the plugin uses nothing but Node built-ins.
 
-重启 dsh 即生效。插件自带 bundle 配置，不需要手动改 `cordis.patch.yml`。默认零配置：不需要 API key，不下载模型，不起额外进程。
+Restart dsh and it is active. The package ships its own bundle patch, so there is nothing to wire up by hand. Zero configuration by default: no API key, no model download, no extra process.
 
-## 它做什么
+## What it does
 
-换一个会话，agent 自己就想起来了。下面是原始运行记录，两个独立的 dsh 进程（0.1.2-rc.1）：
+Open a fresh session and the agent already knows. Verbatim output from two separate dsh processes (0.1.2-rc.1), translated from the Chinese original:
 
 ```text
-$ dsh --profile headless "请用 memory_save 工具记住：本项目的部署端口是 8080，依赖用 pnpm 管理。"
+$ dsh --profile headless "Use memory_save to remember: this project deploys on port 8080,
+                          and dependencies are managed with pnpm."
 
-已完成记忆保存：
-1. **环境**：本项目的部署端口是 8080。
-2. **约定**：本项目依赖用 pnpm 管理（而非 npm/yarn）。
+Saved to memory:
+1. **Environment**: the project's deployment port is 8080.
+2. **Convention**: dependencies are managed with pnpm (not npm/yarn).
 
-# ——— 进程退出，换一个全新会话，没有任何共享上下文 ———
+# ——— process exits; a brand new session, no shared context ———
 
-$ dsh --profile headless "这个项目的部署端口是多少？依赖用什么管理？直接回答。"
+$ dsh --profile headless "What port does this project deploy on? What manages dependencies?
+                          Answer directly."
 
-根据长期记忆：
-- **部署端口**：8080
-- **依赖管理**：pnpm
+From long-term memory:
+- **Deployment port**: 8080
+- **Dependency management**: pnpm
 ```
 
-第二个会话没有调用任何工具，也没被告知去查记忆——相关内容在模型请求发出之前就已经进了上下文。
+The second session called no tools and was never told to consult memory. The relevant entries were in its context before the model request went out.
 
-这个例子里第一句明确要求了保存。实际使用中不需要：每轮对话结束后，插件会在后台把值得留下的内容蒸馏成事实、摘要和关键词自动入库。
+This example asks for the save explicitly. In practice you do not have to: after each turn the plugin distils what is worth keeping into facts, summaries and keywords in the background.
 
-## 检索
+## Retrieval
 
-大多数记忆插件用一条通道：向量相似度或全文匹配。dsh-memgas 并行跑四条，再按排名融合：
+Most memory plugins retrieve through one channel: vector similarity, or full-text match. dsh-memgas runs four in parallel and fuses them by rank:
 
-| 通道 | 内容 | 擅长 | 可关闭 |
+| Channel | What it is | Good at | Can be disabled |
 |---|---|---|---|
-| 词法 | SQLite FTS5，标识符保原样 | 文件路径、包名、报错码、精确措辞 | 否 |
-| 稠密 | 向量相似度 | 换一种说法问同一件事 | 否 |
-| 多粒度 | 会话/轮次/摘要/关键词四个粒度分别检索，按熵路由分配权重 | 判断该看整段会话还是某一轮 | 是 |
-| 图扩展 | 以前两条通道的命中为种子，在关联图上跑 Personalized PageRank | 跨会话的多跳关联 | 是 |
+| Lexical | SQLite FTS5, identifiers kept intact | Paths, package names, error codes, exact wording | No |
+| Dense | Vector similarity | The same question asked differently | No |
+| Granularity | Session / turn / summary / keyword retrieved separately, weighted by an entropy router | Deciding whether a whole session or one turn is the right unit | Yes |
+| Graph | Personalized PageRank over the association graph, seeded by the baseline hits | Multi-hop links across sessions | Yes |
 
-融合用 Reciprocal Rank Fusion，只看排名不看分数——各通道的分数量纲不可比，某条通道整体失准时不会污染其他通道的排序。
+Fusion is Reciprocal Rank Fusion: rank-based, never score-based. Channel scores are not comparable (BM25 against cosine against PageRank mass), so a channel whose scores are miscalibrated can still only contribute through its ordering.
 
-**基线保底。** 最终结果里至少一半席位留给词法和稠密两条通道，增强通道只能填充剩余席位与重排。最坏情况下的检索质量等于普通检索。
+**Baseline floor.** At least half the final slots are reserved for the lexical and dense channels. The enhancement channels can add and reorder, never evict. The worst case equals plain retrieval.
 
-**自动降级。** 记忆太少就只跑基线两条；熵路由没有区分度就回落等权重；关联图太稀疏就跳过图通道，出现超级枢纽节点就截断它的边而不是关掉整条通道；任一通道抛异常或超时就跳过它，其余照常融合。整条路径有延迟预算，超时返回已完成通道的结果。检索失败从不影响正在进行的对话。
+**Automatic degradation.** Too few memories and only the baseline runs. An entropy router with no signal falls back to uniform weights. A graph too sparse to mean anything is skipped; a hub node gets its edges trimmed rather than the whole channel switched off. A channel that throws or overruns its budget is dropped and the rest still fuse. The whole path has a latency budget. A failed retrieval never affects the turn in progress.
 
-`/memory diag <关键词>` 会打印每条通道的原始结果和融合过程，每条记忆都能说清是哪条通道、排第几、什么分数带回来的。
+`/memory diag <query>` prints every channel's raw results and the fusion that produced the final ranking, so each memory can be traced to the channel, rank and score that surfaced it.
 
-## 记忆会演化
+## Memory evolves
 
-记忆不是只写不改的日志。六个后台过程持续整理，全部在队列里跑，不占对话的关键路径：
+Memory is not a write-only log. Six background processes keep it in order, all on a queue, none on the critical path of a turn:
 
-- **关联** — 新记忆入库时按相似度分布聚类，与真正相关的历史记忆建边
-- **调和** — 重复的合并、过时的走版本链标记取代、矛盾的两条都留下并标注冲突
-- **强化** — 被取回并真正用上的记忆权重上升，反复一起出现的记忆之间建立连接
-- **衰减** — 长期无人问津的记忆归档（只归档，不删除，随时可恢复）
-- **抽象** — 一组相关记忆积累到一定规模，综合成一条更高层的约定，来源保持可用
-- **重关联** — 记忆库增长后刷新关联图，让它反映当前实际的分布
+- **Associate** — a new memory is clustered against the similarity distribution of existing ones and linked to those that genuinely relate
+- **Reconcile** — duplicates merge, superseded facts get a version chain, contradictions are kept as both sides with the conflict recorded
+- **Reinforce** — memories that were retrieved and actually used gain weight; memories repeatedly retrieved together become linked
+- **Decay** — untouched memories are archived (archived, never deleted, always restorable)
+- **Abstract** — once a cluster grows large enough it is summarized into a higher-level convention, sources left intact
+- **Re-associate** — the graph is refreshed as the store grows so it reflects the current distribution
 
-任何一个过程失败都不影响其他过程，也不影响对话。
+A failure in any one process affects neither the others nor the conversation.
 
-## 工具与命令
+## Tools and commands
 
-agent 可以用三个工具：`memory_search`、`memory_save`、`memory_status`。
+Three tools for the model: `memory_search`, `memory_save`, `memory_status`.
 
-你可以用 `/memory`：
+`/memory` for you:
 
 ```text
-/memory status              记忆条数、向量模型、索引与通道状态
-/memory search <关键词>      检索并列出记忆卡片
-/memory diag <关键词>        显示各通道的原始结果与融合过程
-/memory list [数量]          按重要度列出本项目的记忆
-/memory forget <id>         归档一条记忆（可恢复）
-/memory restore <id>        恢复归档的记忆
-/memory pin <id>            标记为常驻，不受自动衰减影响
-/memory review              处理等待确认的记忆
-/memory export              以 JSON 导出本项目的记忆
-/memory purge --yes         物理删除本项目的全部记忆（不可恢复）
+/memory status              store size, embedder, index and channel state
+/memory search <query>      retrieve and list memory cards
+/memory diag <query>        show each channel's results and the fusion
+/memory list [n]            list this project's memories by importance
+/memory forget <id>         archive one memory (reversible)
+/memory restore <id>        bring an archived memory back
+/memory pin <id>            exempt a memory from automatic decay
+/memory review              handle memories waiting for confirmation
+/memory export              export this project's memories as JSON
+/memory purge --yes         permanently delete this project's memories
 ```
 
-## 配置
+## Configuration
 
-在 profile 的 `cordis.patch.yml` 里按 id 覆盖，全部字段可选：
+Override by id in your profile's `cordis.patch.yml`. Every field is optional:
 
 ```yaml
 - id: memgas
   config:
-    mode: hybrid             # lite（只跑基线两条通道）| hybrid | memgas（增强通道权重更高）
-    k: 8                     # 每次检索返回的记忆条数
-    harvest: true            # 自动从对话里收割记忆
-    recall: true             # 轮次开始前主动注入相关记忆
-    evolve: true             # 运行后台整理过程
-    confirmWrites: false     # true 时自动收割的记忆先进 /memory review 队列
-    localModel: null         # 见下方「向量模型」
+    mode: hybrid             # lite (baseline only) | hybrid | memgas (heavier enhancements)
+    k: 8                     # memories returned per search
+    harvest: true            # distil memories from the conversation automatically
+    recall: true             # inject relevant memories before a step
+    evolve: true             # run the background maintenance
+    confirmWrites: false     # true queues harvested memories for /memory review
+    localModel: null         # see "Embeddings" below
 ```
 
-完整字段见[设计文档](./docs/design.md#配置草案)。
+The full field list is in the [design document](./docs/design.md#配置草案) (Chinese).
 
-## 隐私与存储
+## Privacy and storage
 
-记忆库是本机的 SQLite 文件，按项目分开存放在 `$DSH_HOME/memgas/`，一个作用域一个文件，方便单独导出或删除。项目作用域按 git remote 归一化，同一个仓库在不同机器上克隆也是同一份记忆。
+The store is a local SQLite file per project scope under `$DSH_HOME/memgas/`, so a single project's memories can be exported or deleted on their own. Scope is derived from the normalized git remote, so a repository cloned on another machine maps to the same memories.
 
-**不外发。** 摘要和整理复用 dsh 里你已经配好的模型，不需要额外的 API key，也不会把记忆发到任何第三方服务。写入前会拦截密钥、token、私钥形态的内容。
+**Nothing leaves your machine.** Summarization and maintenance reuse the model you already configured in dsh: no extra API key, no third-party service. Credential-shaped content is stripped before anything is written.
 
-## 向量模型
+## Embeddings
 
-默认使用不依赖任何下载的词法向量，装完即用。需要语义泛化能力时可以启用本地模型：
+The default embedder needs no download and works immediately. For semantic generalization, enable a local model:
 
 ```sh
 pnpm add @huggingface/transformers
@@ -134,44 +136,44 @@ pnpm add @huggingface/transformers
   config:
     localModel:
       model: multilingual-e5-small
-      mirror: https://hf-mirror.com   # 可选
+      mirror: https://hf-mirror.com   # optional
 ```
 
-模型在后台加载，加载期间和加载失败时都由词法向量顶替，就绪后自动为已有记忆补算向量。它不是本插件的依赖——`onnxruntime` 这类原生模块会让 `dsh plugin add` 撞上构建脚本授权，所以交给需要的人自行安装。
+It loads in the background; the lexical embedder serves until it is ready and keeps serving if the load fails. Existing memories are re-embedded once it is available. It is deliberately not a dependency of this package — native modules like `onnxruntime` would make `dsh plugin add` hit pnpm's build-script approval gate, so it stays opt-in.
 
-## 给其他 agent 用
+## Other agents
 
-[`memgas-mcp`](https://www.npmjs.com/package/memgas-mcp) 通过 MCP 暴露同一套记忆库，Claude Code、Codex 等宿主可以共用：
+[`memgas-mcp`](https://www.npmjs.com/package/memgas-mcp) exposes the same store over MCP, so Claude Code, Codex and others can share it:
 
 ```json
 { "command": "npx", "args": ["-y", "memgas-mcp"] }
 ```
 
-默认与插件共用 `$DSH_HOME/memgas/`。它没有自己的模型，`memory_ingest` 直接原文入库不做摘要，所以记忆质量低于插件侧，也没有自动收割和主动注入。
+It defaults to the same `$DSH_HOME/memgas/` location. It has no model of its own: `memory_ingest` stores the transcript verbatim rather than summarizing, and there is no automatic harvesting or proactive recall.
 
-## 已知限制
+## Known limitations
 
-- **本地向量模型未经真实模型验证。** ONNX 加载路径只用注入的假运行时测过，mean pooling 与维度处理没有跑过真实权重。默认关闭，不影响开箱使用。
-- **`memgas-mcp` 没有和真实 MCP 客户端连过**，只验证了 JSON-RPC 协议层。
-- **一次性模式下蒸馏滞后一个会话。** `dsh --profile headless` 跑完就退出，来不及做完模型抽取；原始对话始终同步落盘且可检索，蒸馏在下次会话开始时补做。常驻的 `dsh web` 没有这个问题。
-- **多工作区。** 作用域按会话的工作目录解析，同一个 host 里不同工作区的会话各自归属正确的项目，但这一路径尚未在 `dsh web` 的多工作区场景下实测。
-- 检索的默认权重与阈值是工程判断，没有针对特定数据集调过参。
+- **The local embedding model has not been verified against real weights.** The ONNX path was tested with an injected fake runtime; mean pooling and dimension handling have not run against an actual model. It is off by default.
+- **`memgas-mcp` has not been connected to a real MCP client**, only its JSON-RPC layer is verified.
+- **In one-shot mode, distillation lags by one session.** `dsh --profile headless` exits before the extraction model answers. The raw transcript is always stored synchronously and stays searchable; distillation is finished at the start of the next session. Long-running `dsh web` is unaffected.
+- **Multiple workspaces.** Scope is resolved per session from its working directory, but this path has not been exercised in a multi-workspace `dsh web` setup.
+- Default retrieval weights and thresholds are engineering judgements; they have not been tuned against any particular dataset.
 
-## 开发
+## Development
 
 ```sh
 pnpm install
-pnpm test        # vitest，263 个测试
-pnpm run build   # tsc -b，兼做类型检查
+pnpm test        # vitest, 263 tests
+pnpm run build   # tsc -b, also the typecheck
 ```
 
-`pnpm run build` 会先 `tsc -b`，再用 esbuild 把插件与 core 打成 `dist/index.js`。**这个产物随仓库提交**，改了插件代码要重新构建并一起提交，否则从 GitHub 安装的人拿到的还是旧版本。
+`pnpm run build` runs `tsc -b` and then bundles the plugin and core into `dist/index.js` with esbuild. **That artifact is committed**, so a change to the plugin has to be rebuilt and committed with it, or GitHub installs keep serving the previous build.
 
-源码分三个包：`packages/dsh-plugin`（dsh 接线）、[`memgas-core`](./packages/core)（存储、检索通道、演化，与 dsh 无关，单独发布在 npm）、[`memgas-mcp`](./packages/mcp)（MCP server）。
+The source is three packages: `packages/dsh-plugin` (dsh wiring), [`memgas-core`](./packages/core) (storage, retrieval channels, evolution; no dsh dependency, published separately), [`memgas-mcp`](./packages/mcp) (MCP server).
 
-设计取舍、决策记录和未决问题都在[设计文档](./docs/design.md)里。
+Design trade-offs, decision records and open questions are in the [design document](./docs/design.md) (Chinese).
 
-## 引用
+## Citation
 
 ```bibtex
 @inproceedings{xu2026memgas,
@@ -182,6 +184,6 @@ pnpm run build   # tsc -b，兼做类型检查
 }
 ```
 
-## 许可证
+## License
 
 [MIT](./LICENSE)
